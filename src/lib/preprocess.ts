@@ -43,17 +43,16 @@ export const SCAN_ROI: Roi = { x: 0.04, y: 0.06, w: 0.92, h: 0.86 }
 const TARGET_WIDTH = 1200
 
 /**
- * Map the on-screen ROI box onto the video's intrinsic pixel grid.
+ * The `object-fit: cover` transform, from the element's CSS box to the video's
+ * intrinsic pixel grid.
  *
- * The <video> is rendered with `object-fit: cover`, so its CSS box and its
- * intrinsic videoWidth/videoHeight have different aspect ratios and the frame
- * is cropped on one axis. Slicing with raw fractions would silently drift off
- * target — the box the user sees would not be the pixels we read.
+ * The two have different aspect ratios and the frame is cropped on one axis, so
+ * anything that goes from what the user sees to what the camera captured has to
+ * come back through this — reading raw fractions would silently drift off
+ * target. Returns null until the element is laid out and the first frame has
+ * arrived; `videoWidth` is 0 before that.
  */
-export function roiToSourceRect(
-  video: HTMLVideoElement,
-  roi: Roi,
-): { sx: number; sy: number; sw: number; sh: number } | null {
+function coverTransform(video: HTMLVideoElement) {
   const vw = video.videoWidth
   const vh = video.videoHeight
   const cw = video.clientWidth
@@ -62,12 +61,34 @@ export function roiToSourceRect(
 
   // `cover` scales the frame up until it fills both axes, overflowing one.
   const scale = Math.max(cw / vw, ch / vh)
-  const renderedW = vw * scale
-  const renderedH = vh * scale
 
-  // Offsets are <= 0: the overflow is split evenly and clipped on both sides.
-  const offsetX = (cw - renderedW) / 2
-  const offsetY = (ch - renderedH) / 2
+  return {
+    vw,
+    vh,
+    cw,
+    ch,
+    scale,
+    // Offsets are <= 0: the overflow is split evenly and clipped on both sides.
+    offsetX: (cw - vw * scale) / 2,
+    offsetY: (ch - vh * scale) / 2,
+  }
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+/**
+ * Map the on-screen ROI box onto the video's intrinsic pixel grid, so the box
+ * the user frames with is the pixels that actually get read.
+ */
+export function roiToSourceRect(
+  video: HTMLVideoElement,
+  roi: Roi,
+): { sx: number; sy: number; sw: number; sh: number } | null {
+  const transform = coverTransform(video)
+  if (!transform) return null
+  const { vw, vh, cw, ch, scale, offsetX, offsetY } = transform
 
   // ROI in element coordinates, then back through the transform.
   const sx = (roi.x * cw - offsetX) / scale
@@ -83,6 +104,33 @@ export function roiToSourceRect(
     sy: clampedY,
     sw: Math.max(1, Math.min(sw, vw - clampedX)),
     sh: Math.max(1, Math.min(sh, vh - clampedY)),
+  }
+}
+
+/**
+ * Map a point the user tapped — as fractions of the displayed video box — onto
+ * the frame's own coordinate space, also as fractions.
+ *
+ * This is what `pointsOfInterest` wants when telling the camera where to focus:
+ * the point is relative to the **captured frame**, not to the element, and with
+ * `object-fit: cover` those disagree by however much is cropped off the
+ * overflowing axis. Tapping the top of a tall screen would otherwise aim the
+ * autofocus somewhere above the paper entirely.
+ *
+ * Clamped to 0..1: a tap in the cropped-away region has no exact counterpart in
+ * the frame, and the nearest edge is the honest answer.
+ */
+export function pointToSourceFraction(
+  video: HTMLVideoElement,
+  point: { x: number; y: number },
+): { x: number; y: number } | null {
+  const transform = coverTransform(video)
+  if (!transform) return null
+  const { vw, vh, cw, ch, scale, offsetX, offsetY } = transform
+
+  return {
+    x: clamp01((point.x * cw - offsetX) / scale / vw),
+    y: clamp01((point.y * ch - offsetY) / scale / vh),
   }
 }
 

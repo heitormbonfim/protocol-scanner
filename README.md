@@ -93,6 +93,24 @@ The status pill tells you what is happening: *Procurando o protocolo…*, then
 *Confirmando… 2 de 3*. A second line says how it found the number — "achou o
 campo Protocolo" is the strongest signal.
 
+### Focus
+
+**Tap the paper on screen to focus on it.** A ring marks the spot and the camera
+runs one focus sweep there, then holds it — the same gesture as a native camera
+app. Tap again to redo it. A flat white page gives continuous autofocus very
+little to lock onto, so this is usually what turns a soft frame into a readable
+one. The app also asks for continuous autofocus when the camera opens, since
+some Android cameras come up in a fixed-focus mode at high resolutions.
+
+What tapping cannot fix is being **inside the camera's minimum focus distance**
+— hold the phone back until the whole slip fits the guide.
+
+> **Not available on iOS.** Focus control comes from the Image Capture spec,
+> which Chrome on Android implements and WebKit does not implement at all. There
+> is no way to trigger or aim focus from a page in Safari, so the app detects
+> the missing capability, drops the hint and the tap target, and leaves iOS to
+> its own continuous autofocus.
+
 When enough frames agree, the phone vibrates and the confirm sheet appears with
 the **photo above the digits**. Check they match and confirm.
 
@@ -268,7 +286,7 @@ pnpm test:watch   # watch mode
 pnpm test:ui      # browser UI
 ```
 
-Vitest + Testing Library + MSW, 134 tests. Notable coverage:
+Vitest + Testing Library + MSW, 140 tests. Notable coverage:
 
 - **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
   from the reference photo, including the mangled `Nº`; label anchoring
@@ -276,9 +294,10 @@ Vitest + Testing Library + MSW, 134 tests. Notable coverage:
 - **`queue.test.ts`** — the AS rule: AS never precedes the ordinary protocol,
   never fires when it fails, never fires without an ID; strict one-at-a-time
   sequencing verified by counting concurrent in-flight requests.
-- **`preprocess.test.ts`** — the `object-fit: cover` coordinate mapping, and a
-  guard that the scan region stays large (a regression here silently reproduces
-  the focus-blur bug).
+- **`preprocess.test.ts`** — the `object-fit: cover` coordinate mapping, for
+  both the scan box and the tap-to-focus point, including that the two agree at
+  the same on-screen spot; and a guard that the scan region stays large (a
+  regression here silently reproduces the focus-blur bug).
 - **`api.test.ts`** — ID field variants, error mapping, URL construction; the
   bearer token on all three calls and its absence when unconfigured; the mocks
   answering a non-GET, so switching a method stays a one-word change.
@@ -349,7 +368,7 @@ src/
     storage.ts       localStorage history + migration
     config.ts        env-driven URLs
   hooks/
-    useCamera.ts     getUserMedia, torch, teardown
+    useCamera.ts     getUserMedia, torch, tap-to-focus, teardown
     useScanner.ts    the scan loop
   components/
     Dashboard.tsx    home: stats, history, actions
@@ -393,6 +412,13 @@ self-signed certificate, add the origin to
 **It never finds a number.** Get the whole slip in the guide and hold steady for
 a couple of seconds — do not move closer. Use the torch button in dim light. A
 frame takes about a second, and three need to agree.
+
+**The picture will not sharpen.** Tap the paper on screen — that runs a focus
+sweep aimed at the point you touched, and a ring marks where. If it is still
+soft, **move the phone further away**: every camera has a minimum focus
+distance, and inside it nothing focuses, in any app. This is also why the guide
+is large. On iOS there is no tap-to-focus at all (see below), so distance and
+light are the only levers there.
 
 **It found the wrong number.** Correct it on the confirm sheet, or later from
 the history with the pencil icon. If it happens often, more light and a flatter,

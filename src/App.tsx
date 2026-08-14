@@ -296,8 +296,10 @@ export default function App() {
           cameraError={camera.error}
           torchOn={camera.torchOn}
           torchSupported={camera.torchSupported}
+          focusSupported={camera.focusSupported}
           onStart={() => void camera.start()}
           onToggleTorch={() => void camera.toggleTorch()}
+          onFocusAt={(point) => void camera.focusAt(point)}
           ocrReady={scanner.ready}
           scannerError={scanner.error}
           agreement={scanner.agreement}

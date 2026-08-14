@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SCAN_ROI, roiToSourceRect } from './preprocess'
+import { SCAN_ROI, pointToSourceFraction, roiToSourceRect } from './preprocess'
 
 /**
  * `roiToSourceRect` maps the framing box the user sees onto the video's
@@ -90,6 +90,66 @@ describe('roiToSourceRect', () => {
     })
     expect(rect!.sw).toBeGreaterThan(0)
     expect(rect!.sh).toBeGreaterThan(0)
+  })
+})
+
+describe('pointToSourceFraction', () => {
+  /**
+   * Where tap-to-focus aims. The same `cover` crop applies, so a tap near the
+   * top of a tall screen is *not* near the top of the frame — getting this
+   * wrong points the autofocus at something other than the paper, and the only
+   * symptom is that focusing seems not to work.
+   */
+  it('returns null before the stream has dimensions', () => {
+    expect(pointToSourceFraction(fakeVideo(0, 0, 400, 800), { x: 0.5, y: 0.5 })).toBeNull()
+  })
+
+  it('maps the centre to the centre', () => {
+    const point = pointToSourceFraction(fakeVideo(1920, 1080, 400, 800), {
+      x: 0.5,
+      y: 0.5,
+    })
+    expect(point!.x).toBeCloseTo(0.5, 5)
+    expect(point!.y).toBeCloseTo(0.5, 5)
+  })
+
+  it('passes fractions straight through when aspect ratios match', () => {
+    const point = pointToSourceFraction(fakeVideo(1000, 1000, 500, 500), {
+      x: 0.25,
+      y: 0.75,
+    })
+    expect(point!.x).toBeCloseTo(0.25, 5)
+    expect(point!.y).toBeCloseTo(0.75, 5)
+  })
+
+  it('compresses the axis that cover crops', () => {
+    // Landscape camera, portrait element: the sides are clipped, so the full
+    // width of the screen only spans the middle band of the frame.
+    const left = pointToSourceFraction(fakeVideo(1920, 1080, 400, 800), {
+      x: 0,
+      y: 0.5,
+    })
+    expect(left!.x).toBeCloseTo(690 / 1920, 4)
+    expect(left!.x).toBeGreaterThan(0)
+  })
+
+  it('clamps a tap in the cropped-away region to the frame edge', () => {
+    const point = pointToSourceFraction(fakeVideo(1080, 1920, 800, 400), {
+      x: 0.5,
+      y: 1.4,
+    })
+    expect(point!.y).toBeLessThanOrEqual(1)
+    expect(point!.y).toBeGreaterThanOrEqual(0)
+  })
+
+  it('agrees with the ROI mapping at the same on-screen point', () => {
+    // Both go through the same transform; if they ever disagree, the guide and
+    // the focus point are describing different places.
+    const video = fakeVideo(1920, 1080, 400, 800)
+    const rect = roiToSourceRect(video, { x: 0.25, y: 0.4, w: 0.1, h: 0.1 })
+    const point = pointToSourceFraction(video, { x: 0.25, y: 0.4 })
+    expect(point!.x).toBeCloseTo(rect!.sx / 1920, 5)
+    expect(point!.y).toBeCloseTo(rect!.sy / 1080, 5)
   })
 })
 

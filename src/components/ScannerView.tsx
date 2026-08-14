@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Camera, Check, Flashlight, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { SCAN_ROI } from '@/lib/preprocess'
+import { SCAN_ROI, pointToSourceFraction } from '@/lib/preprocess'
 import { cn } from '@/lib/utils'
 import type { CameraStatus } from '@/hooks/useCamera'
 import type { MatchSource } from '@/lib/protocol'
@@ -12,8 +13,12 @@ type ScannerViewProps = {
   cameraError: string | null
   torchOn: boolean
   torchSupported: boolean
+  /** False on iOS, where WebKit exposes no focus control at all. */
+  focusSupported: boolean
   onStart: () => void
   onToggleTorch: () => void
+  /** Point normalised to the captured frame — see `pointToSourceFraction`. */
+  onFocusAt: (point: { x: number; y: number }) => void
   ocrReady: boolean
   scannerError: string | null
   agreement: number
@@ -31,14 +36,19 @@ const SOURCE_LABEL: Record<MatchSource, string> = {
   salvaged: 'número recuperado',
 }
 
+/** How long the focus ring stays on screen after a tap. */
+const FOCUS_RING_MS = 900
+
 export function ScannerView({
   videoRef,
   cameraStatus,
   cameraError,
   torchOn,
   torchSupported,
+  focusSupported,
   onStart,
   onToggleTorch,
+  onFocusAt,
   ocrReady,
   scannerError,
   agreement,
@@ -49,6 +59,36 @@ export function ScannerView({
   onClose,
 }: ScannerViewProps) {
   const active = cameraStatus === 'active'
+
+  /** Where the ring is drawn: element coordinates, unlike what the camera gets. */
+  const [ring, setRing] = useState<{ x: number; y: number; at: number } | null>(null)
+
+  useEffect(() => {
+    if (!ring) return
+    const timer = setTimeout(() => setRing(null), FOCUS_RING_MS)
+    return () => clearTimeout(timer)
+  }, [ring])
+
+  function handleFocusTap(event: React.MouseEvent<HTMLButtonElement>) {
+    const video = videoRef.current
+    if (!video) return
+
+    // `detail === 0` is a keyboard activation, which carries no coordinates —
+    // aim at the middle of the guide, which is where the paper should be.
+    const rect = event.currentTarget.getBoundingClientRect()
+    const point =
+      event.detail === 0
+        ? { x: 0.5, y: 0.5 }
+        : {
+            x: (event.clientX - rect.left) / rect.width,
+            y: (event.clientY - rect.top) / rect.height,
+          }
+
+    setRing({ ...point, at: Date.now() })
+
+    const framePoint = pointToSourceFraction(video, point)
+    if (framePoint) onFocusAt(framePoint)
+  }
 
   return (
     <div className="fixed inset-0 bg-black">
@@ -61,6 +101,28 @@ export function ScannerView({
         autoPlay
         aria-label="Visualização da câmera"
       />
+
+      {/* Tap-to-focus. A flat white page gives continuous autofocus very little
+          to lock onto, so being able to say "focus here" is the difference
+          between a readable frame and a blurred one. Sits above the video and
+          below the controls, which are later siblings and keep their own taps. */}
+      {active && focusSupported && (
+        <button
+          type="button"
+          className="absolute inset-0 cursor-pointer"
+          onClick={handleFocusTap}
+          aria-label="Tocar para focar"
+        />
+      )}
+
+      {ring && (
+        <span
+          key={ring.at}
+          className="pointer-events-none absolute z-10 size-20 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary/90 duration-200 animate-in fade-in-0 zoom-in-50"
+          style={{ left: `${ring.x * 100}%`, top: `${ring.y * 100}%` }}
+          aria-hidden
+        />
+      )}
 
       {active && (
         <div className="pointer-events-none absolute inset-0" aria-hidden>
@@ -153,6 +215,11 @@ export function ScannerView({
               {source && !paused && (
                 <span className="rounded-full bg-black/65 px-3 py-1 text-[11px] text-white/80 backdrop-blur">
                   {SOURCE_LABEL[source]}
+                </span>
+              )}
+              {focusSupported && !paused && (
+                <span className="rounded-full bg-black/65 px-3 py-1 text-[11px] text-white/70 backdrop-blur">
+                  toque na folha para focar
                 </span>
               )}
             </div>

@@ -14,6 +14,39 @@ export type CameraStatus = 'idle' | 'starting' | 'active' | 'error'
 type TorchCapabilities = MediaTrackCapabilities & { torch?: boolean }
 type TorchConstraint = { torch: boolean }
 
+/**
+ * Focus control comes from the Image Capture spec, which lib.dom does not
+ * cover. Chrome on Android implements it; WebKit implements none of it, so on
+ * iOS `focusMode` is simply absent from the capabilities and everything below
+ * degrades to the camera's own continuous autofocus.
+ */
+type FocusCapabilities = MediaTrackCapabilities & { focusMode?: string[] }
+type FocusConstraint = {
+  focusMode?: string
+  /** Normalised to the *captured frame*, not the element. See `pointToSourceFraction`. */
+  pointsOfInterest?: { x: number; y: number }[]
+}
+
+function focusModesOf(track: MediaStreamTrack | undefined): string[] {
+  const capabilities = track?.getCapabilities?.() as FocusCapabilities | undefined
+  return capabilities?.focusMode ?? []
+}
+
+/** Advanced constraints are best-effort, so a rejection is informative, not fatal. */
+async function tryConstraints(
+  track: MediaStreamTrack,
+  constraint: FocusConstraint,
+): Promise<boolean> {
+  try {
+    await track.applyConstraints({
+      advanced: [constraint],
+    } as MediaTrackConstraints)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function explainCameraError(error: unknown): string {
   if (!(error instanceof DOMException)) {
     return error instanceof Error ? error.message : 'Falha ao abrir a câmera'
@@ -40,6 +73,7 @@ export function useCamera() {
   const [error, setError] = useState<string | null>(null)
   const [torchOn, setTorchOn] = useState(false)
   const [torchSupported, setTorchSupported] = useState(false)
+  const [focusSupported, setFocusSupported] = useState(false)
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -48,6 +82,7 @@ export function useCamera() {
     setStatus('idle')
     setTorchOn(false)
     setTorchSupported(false)
+    setFocusSupported(false)
   }, [])
 
   const start = useCallback(async () => {
@@ -90,6 +125,20 @@ export function useCamera() {
       const [track] = stream.getVideoTracks()
       const capabilities = track?.getCapabilities?.() as TorchCapabilities | undefined
       setTorchSupported(Boolean(capabilities?.torch))
+
+      // Ask for continuous autofocus explicitly. Some Android cameras come up
+      // in a fixed-focus mode — particularly when a high resolution is
+      // requested, as it is above — and then never sharpen no matter how the
+      // phone is held, which is precisely the symptom this addresses.
+      const modes = focusModesOf(track)
+      if (track && modes.includes('continuous')) {
+        await tryConstraints(track, { focusMode: 'continuous' })
+      }
+      // Any focus mode at all means the camera will take direction from a tap.
+      // WebKit reports none, so on iOS the affordance is dropped rather than
+      // shown doing nothing.
+      setFocusSupported(modes.length > 0)
+
       setStatus('active')
     } catch (caught) {
       stop()
@@ -115,6 +164,42 @@ export function useCamera() {
     }
   }, [torchOn])
 
+  /**
+   * Aim the autofocus at a point the user tapped.
+   *
+   * `point` is normalised to the **captured frame** — map the tap through
+   * `pointToSourceFraction` first, or the aim lands wherever `object-fit: cover`
+   * cropped to.
+   *
+   * A tap means "focus here, now", so it asks for `single-shot`: one sweep,
+   * then held. That is what a native camera app does, and it is the mode that
+   * actually helps with a sheet of paper, since continuous autofocus on a flat
+   * white page tends to hunt. Tapping again re-runs it.
+   *
+   * Returns false when the camera would not take direction, so the caller can
+   * tell the user rather than leaving a tap that appears to do nothing.
+   */
+  const focusAt = useCallback(async (point: { x: number; y: number }) => {
+    const [track] = streamRef.current?.getVideoTracks() ?? []
+    if (!track) return false
+
+    const modes = focusModesOf(track)
+    if (modes.length === 0) return false
+
+    const mode = modes.includes('single-shot')
+      ? 'single-shot'
+      : modes.includes('continuous')
+        ? 'continuous'
+        : modes[0]
+
+    // Point and mode together first; some devices advertise a mode but reject
+    // the point, and a fresh sweep without a region is still better than none.
+    return (
+      (await tryConstraints(track, { focusMode: mode, pointsOfInterest: [point] })) ||
+      (await tryConstraints(track, { focusMode: mode }))
+    )
+  }, [])
+
   // Release the camera on unmount — a live track keeps the phone's camera
   // indicator on and drains battery.
   useEffect(() => stop, [stop])
@@ -125,8 +210,10 @@ export function useCamera() {
     error,
     torchOn,
     torchSupported,
+    focusSupported,
     start,
     stop,
     toggleTorch,
+    focusAt,
   }
 }
