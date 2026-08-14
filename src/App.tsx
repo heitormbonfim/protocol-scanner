@@ -24,8 +24,12 @@ export default function App() {
   const [progress, setProgress] = useState<QueueProgress | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [sessionCount, setSessionCount] = useState(0)
-  /** Sticky AS choice, so a run of AS slips does not need re-ticking each page. */
-  const [defaultWithAs, setDefaultWithAs] = useState(false)
+  /**
+   * Sticky AS choice, so a run of AS slips does not need re-ticking each page.
+   * Starts **on**: most slips are protocolled alongside AS, so the common case
+   * should be the one that needs no tap. Unticking it sticks just the same.
+   */
+  const [defaultWithAs, setDefaultWithAs] = useState(true)
 
   const camera = useCamera()
   const abortRef = useRef<AbortController | null>(null)

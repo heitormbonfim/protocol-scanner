@@ -31,7 +31,7 @@ Dashboard ──▶ Escanear ──▶ camera scans continuously
                         several frames agree
                                ▼
                         CONFIRM SHEET  (photo + digits side by side)
-                               │  ✓ Confirmar   [ ] Protocolar também AS
+                               │  ✓ Confirmar   [x] Protocolar também AS
                                ▼
               GET {LOOKUP_URL}?numprotocol=<num>  →  { id }
                     (in the background — scanning never waits)
@@ -94,9 +94,12 @@ The status pill tells you what is happening: *Procurando o protocolo…*, then
 campo Protocolo" is the strongest signal.
 
 When enough frames agree, the phone vibrates and the confirm sheet appears with
-the **photo above the digits**. Check they match, tick AS if this slip needs it,
-and confirm. The AS choice sticks for the next slip, so a run of AS pages does
-not need re-ticking.
+the **photo above the digits**. Check they match and confirm.
+
+**"Protocolar também AS" starts ticked**, because most slips are protocolled
+alongside AS — untick it for the ones that are not. Either way the choice sticks
+for the next slip, so a run of pages that all go the same way needs no tapping
+at all.
 
 Tap the number itself to correct it before saving.
 
@@ -160,14 +163,43 @@ changing any of them.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VITE_USE_MOCK` | `true` | Serve the mock API from the dev server |
-| `VITE_LOOKUP_URL` | `/api/protocols` | `GET ?numprotocol=<num>` → `{ id }` |
-| `VITE_PROTOCOL_URL` | `/api/protocols` | `GET /<id>` — ordinary protocol |
-| `VITE_PROTOCOL_AS_URL` | `/api/protocols-as` | `GET /<id>` — AS protocol |
+| `VITE_LOOKUP_URL` | `/api/protocols` | `?numprotocol=<num>` → `{ id }` |
+| `VITE_PROTOCOL_URL` | `/api/protocols` | `/<id>` — ordinary protocol |
+| `VITE_PROTOCOL_AS_URL` | `/api/protocols-as` | `/<id>` — AS protocol |
+| `VITE_AUTH_TOKEN` | *(empty)* | Sent as `Authorization: Bearer <token>` |
 | `VITE_REQUEST_TIMEOUT_MS` | `15000` | Per-request timeout |
 
 All three URLs are independent. Relative paths resolve against the app's own
 origin (what you want when routing through the Vite dev proxy); absolute
 `https://` URLs work too if the service sends CORS headers.
+
+### Auth
+
+Set `VITE_AUTH_TOKEN` and **every** request — the ID lookup and both
+submissions — carries `Authorization: Bearer <token>`. Leave it empty and no
+`Authorization` header is sent at all, rather than a `Bearer` with nothing after
+it, which services tend to answer with a 400 instead of the 401 that would tell
+you the token is missing.
+
+> The token is **not secret once built.** Vite inlines it into the JS bundle, so
+> anyone with the app can read it. That is fine for a token issued to this app
+> on a controlled device. If it must not leave the server, leave the variable
+> empty and have the proxy in [vite.config.ts](vite.config.ts) — or whatever
+> fronts the app in production — attach the header instead.
+
+While mocking, a configured token is **enforced**: the mock answers 401 to a
+request that does not carry it, so a broken wiring fails in dev rather than
+against the real service.
+
+### Methods
+
+Each call's HTTP method is a named constant at the top of
+[src/lib/api.ts](src/lib/api.ts) — `LOOKUP_METHOD`, `PROTOCOL_METHOD`,
+`PROTOCOL_AS_METHOD`. All three are `GET` today; when the real service turns out
+to want a `POST`, change the constant and, if it wants a payload, add a `body`
+at that call site. The shared `request` helper serialises it, sets the
+Content-Type, attaches the token and applies the timeout, and both mock
+transports answer any method — so nothing else needs touching.
 
 **Mocking defaults to on.** A fresh clone with no `.env` runs against mocks
 rather than firing real submissions at a live government service because
@@ -209,7 +241,8 @@ you can reproduce any path on demand:
 
 ## Wiring up the real API
 
-1. Set `VITE_USE_MOCK=false` and the three URLs in `.env.local`.
+1. Set `VITE_USE_MOCK=false`, the three URLs and `VITE_AUTH_TOKEN` in
+   `.env.local`.
 2. Uncomment the `server.proxy` block in [vite.config.ts](vite.config.ts) and
    point `target` at the real host. Proxying server-side avoids CORS.
 
@@ -219,7 +252,11 @@ Two things to check against the real service, both marked in
 - **The ID field.** `readId` currently accepts `id`, `Id`, `ID`, `protocolId`,
   `idProtocolo`, or a bare string/number body. Narrow it once the real shape is
   known.
-- **Auth.** None of the three requests send credentials yet.
+- **The methods.** All three are `GET`; see [Methods](#methods) for switching
+  one to `POST` and giving it a body.
+
+The bearer token needs nothing beyond the variable — it is attached to all three
+requests already.
 
 ---
 
@@ -231,7 +268,7 @@ pnpm test:watch   # watch mode
 pnpm test:ui      # browser UI
 ```
 
-Vitest + Testing Library + MSW, 127 tests. Notable coverage:
+Vitest + Testing Library + MSW, 134 tests. Notable coverage:
 
 - **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
   from the reference photo, including the mangled `Nº`; label anchoring
@@ -242,7 +279,9 @@ Vitest + Testing Library + MSW, 127 tests. Notable coverage:
 - **`preprocess.test.ts`** — the `object-fit: cover` coordinate mapping, and a
   guard that the scan region stays large (a regression here silently reproduces
   the focus-blur bug).
-- **`api.test.ts`** — ID field variants, error mapping, URL construction.
+- **`api.test.ts`** — ID field variants, error mapping, URL construction; the
+  bearer token on all three calls and its absence when unconfigured; the mocks
+  answering a non-GET, so switching a method stays a one-word change.
 - **`storage.test.ts`** — migration of records written by older versions.
 - **`ConfirmSheet.test.tsx`** — the human safety net: photo present, duplicates
   blocked, corrections reported as edited.

@@ -1,5 +1,5 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { lookupProtocolId, protocolAsById, protocolById, readId } from './api'
 import { LOOKUP_URL, PROTOCOL_AS_URL, PROTOCOL_URL } from './config'
 import { server } from '../mocks/server'
@@ -132,5 +132,126 @@ describe('protocolById / protocolAsById', () => {
     expect(result.ok).toBe(false)
     expect(result.reason).toContain('Protocolo já processado')
     if (!result.ok) expect(result.httpStatus).toBe(409)
+  })
+
+  it('digs the message out of a JSON error envelope', async () => {
+    server.use(
+      http.get(`${PROTOCOL_URL}/:id`, () =>
+        HttpResponse.json({ message: 'Protocolo bloqueado' }, { status: 403 }),
+      ),
+    )
+
+    const result = await protocolById('PRT-1')
+    expect(result.reason).toContain('Protocolo bloqueado')
+  })
+
+  it('does not show the user a fragment of an HTML error page', async () => {
+    // What a proxy or gateway returns when the real service is unreachable.
+    server.use(
+      http.get(`${PROTOCOL_URL}/:id`, () =>
+        HttpResponse.text('<!doctype html><title>502 Bad Gateway</title>', {
+          status: 502,
+        }),
+      ),
+    )
+
+    const result = await protocolById('PRT-1')
+    expect(result.reason).not.toContain('<')
+    if (!result.ok) expect(result.httpStatus).toBe(502)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('bearer token', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  /**
+   * `AUTH_TOKEN` is read once, when `config.ts` is first evaluated, so changing
+   * it means re-importing the module graph rather than reassigning a value.
+   */
+  async function apiWith(token: string) {
+    vi.stubEnv('VITE_AUTH_TOKEN', token)
+    vi.resetModules()
+    return import('./api')
+  }
+
+  /** The Authorization header seen by each of the three endpoints, in order. */
+  async function authHeadersSeen(api: typeof import('./api')) {
+    const seen: (string | null)[] = []
+    const record = ({ request }: { request: Request }) => {
+      seen.push(request.headers.get('authorization'))
+      return HttpResponse.json({ id: 'PRT-1' })
+    }
+    server.use(
+      http.all(LOOKUP_URL, record),
+      http.all(`${PROTOCOL_URL}/:id`, record),
+      http.all(`${PROTOCOL_AS_URL}/:id`, record),
+    )
+
+    await api.lookupProtocolId(NUM)
+    await api.protocolById('PRT-1')
+    await api.protocolAsById('PRT-1')
+    return seen
+  }
+
+  it('rides on every request, not just the submissions', async () => {
+    const api = await apiWith('s3cr3t')
+    expect(await authHeadersSeen(api)).toEqual([
+      'Bearer s3cr3t',
+      'Bearer s3cr3t',
+      'Bearer s3cr3t',
+    ])
+  })
+
+  it('is omitted entirely when no token is configured', async () => {
+    // A bare `Bearer ` reads as a malformed credential and tends to draw a 400
+    // rather than the 401 that would say the token is missing.
+    const api = await apiWith('')
+    expect(await authHeadersSeen(api)).toEqual([null, null, null])
+  })
+
+  it('tolerates whitespace around the value in .env', async () => {
+    const api = await apiWith('  s3cr3t\n')
+    expect(await authHeadersSeen(api)).toEqual([
+      'Bearer s3cr3t',
+      'Bearer s3cr3t',
+      'Bearer s3cr3t',
+    ])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The mock transport
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('mock handlers', () => {
+  /**
+   * The method for each call is a constant in `api.ts` that is expected to
+   * change once the real service is pinned down. These guard the claim that
+   * changing it is all you have to do: the mocks must not be GET-only.
+   */
+  it('answers a lookup sent as a POST with a body', async () => {
+    const response = await fetch(new URL(LOOKUP_URL, location.origin), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numprotocol: NUM }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ id: `PRT-${NUM.slice(-6)}` })
+  })
+
+  it('answers a submission sent as a POST', async () => {
+    const response = await fetch(
+      new URL(`${PROTOCOL_URL}/PRT-217719`, location.origin),
+      { method: 'POST' },
+    )
+    expect(response.status).toBe(200)
   })
 })

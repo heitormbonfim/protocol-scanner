@@ -33,6 +33,9 @@ export default defineConfig(({ mode }) => {
         lookupUrl: env.VITE_LOOKUP_URL ?? '/api/protocols',
         protocolUrl: env.VITE_PROTOCOL_URL ?? '/api/protocols',
         protocolAsUrl: env.VITE_PROTOCOL_AS_URL ?? '/api/protocols-as',
+        // When a token is configured, the mock demands it — so a request that
+        // forgets the header fails here rather than in production.
+        token: env.VITE_AUTH_TOKEN?.trim(),
       }),
     ],
     resolve: {

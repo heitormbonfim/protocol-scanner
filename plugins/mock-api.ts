@@ -34,11 +34,32 @@ export type MockApiOptions = {
   lookupUrl: string
   protocolUrl: string
   protocolAsUrl: string
+  /**
+   * When set, every route demands `Authorization: Bearer <token>` and answers
+   * 401 otherwise. Mirrors `VITE_AUTH_TOKEN`, so a token that never reaches the
+   * request fails here, in dev, rather than against the real service.
+   */
+  token?: string
   /** Artificial latency, so spinners and progress bars behave realistically. */
   delayMs?: number
 }
 
-function send(res: Parameters<Connect.NextHandleFunction>[1], reply: MockReply) {
+type Res = Parameters<Connect.NextHandleFunction>[1]
+type Req = Parameters<Connect.NextHandleFunction>[0]
+
+/**
+ * The app is same-origin with this server, so these are not strictly needed —
+ * but they cost nothing and keep things working if the page is opened through a
+ * tunnel. `Authorization` has to be listed explicitly: a bearer token makes any
+ * cross-origin request preflighted.
+ */
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept',
+}
+
+function send(res: Res, reply: MockReply) {
   const payload =
     reply.type === 'json' ? JSON.stringify(reply.body) : String(reply.body)
   res.statusCode = reply.status
@@ -46,11 +67,36 @@ function send(res: Parameters<Connect.NextHandleFunction>[1], reply: MockReply) 
     'Content-Type',
     reply.type === 'json' ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
   )
-  // The app is same-origin with this server, but a permissive header costs
-  // nothing and keeps things working if the page is opened through a tunnel.
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  for (const [header, value] of Object.entries(CORS_HEADERS)) {
+    res.setHeader(header, value)
+  }
   res.setHeader('Cache-Control', 'no-store')
   res.end(payload)
+}
+
+/**
+ * Read a JSON request body, for the methods that carry one.
+ *
+ * Only ever called once a route has already matched — consuming the stream for
+ * a request we then hand to `next()` would leave the real handler with nothing
+ * to read.
+ */
+async function readJsonBody(req: Req): Promise<Record<string, unknown>> {
+  if (req.method === 'GET' || req.method === 'HEAD') return {}
+
+  req.setEncoding('utf8')
+  let text = ''
+  for await (const chunk of req) text += chunk
+  if (!text.trim()) return {}
+
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 /** Trailing-slash-insensitive prefix, so `/api/protocols-as` never matches `/api/protocols`. */
@@ -62,12 +108,12 @@ function segmentAfter(pathname: string, base: string): string | null {
 }
 
 export function mockApi(options: MockApiOptions): Plugin {
-  const { enabled, lookupUrl, protocolUrl, protocolAsUrl } = options
+  const { enabled, lookupUrl, protocolUrl, protocolAsUrl, token } = options
   const delayMs = options.delayMs ?? MOCK_DELAY_MS
 
+  // Deliberately method-agnostic: `src/lib/api.ts` picks a method per call, and
+  // the mock should keep answering when one of them changes to POST.
   const middleware: Connect.NextHandleFunction = (req, res, next) => {
-    if (req.method !== 'GET') return next()
-
     const url = new URL(req.url ?? '/', 'http://localhost')
     const { pathname } = url
 
@@ -75,17 +121,48 @@ export function mockApi(options: MockApiOptions): Plugin {
     // matching in the other order would shadow it.
     const asId = segmentAfter(pathname, protocolAsUrl)
     const protocolId = segmentAfter(pathname, protocolUrl)
-    const isLookup = pathname === lookupUrl && url.searchParams.has('numprotocol')
+    const isLookup = pathname === lookupUrl
 
-    let reply: MockReply | null = null
-    if (asId !== null) reply = protocolAsReply(asId)
-    else if (protocolId !== null) reply = protocolReply(protocolId)
-    else if (isLookup) reply = lookupReply(url.searchParams.get('numprotocol'))
+    if (asId === null && protocolId === null && !isLookup) return next()
 
-    if (!reply) return next()
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204
+      for (const [header, value] of Object.entries(CORS_HEADERS)) {
+        res.setHeader(header, value)
+      }
+      return res.end()
+    }
 
-    const resolved = reply
-    setTimeout(() => send(res, resolved), delayMs)
+    if (token && req.headers.authorization !== `Bearer ${token}`) {
+      return send(res, {
+        status: 401,
+        type: 'json',
+        body: {
+          message:
+            'Mock: Authorization ausente ou diferente de VITE_AUTH_TOKEN. ' +
+            'Confira o header enviado em src/lib/api.ts.',
+        },
+      })
+    }
+
+    const respond = async () => {
+      let reply: MockReply
+      if (asId !== null) reply = protocolAsReply(asId)
+      else if (protocolId !== null) reply = protocolReply(protocolId)
+      else {
+        // The number arrives in the query string on a GET and in the body on
+        // anything else, so a lookup switched to POST still resolves.
+        const body = await readJsonBody(req)
+        const fromBody = body.numprotocol ?? body.num
+        reply = lookupReply(
+          url.searchParams.get('numprotocol') ??
+            (typeof fromBody === 'string' ? fromBody : null),
+        )
+      }
+      setTimeout(() => send(res, reply), delayMs)
+    }
+
+    void respond()
   }
 
   return {
