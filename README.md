@@ -159,7 +159,7 @@ changing any of them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VITE_USE_MOCK` | `true` | Intercept every request with Mock Service Worker |
+| `VITE_USE_MOCK` | `true` | Serve the mock API from the dev server |
 | `VITE_LOOKUP_URL` | `/api/protocols` | `GET ?numprotocol=<num>` → `{ id }` |
 | `VITE_PROTOCOL_URL` | `/api/protocols` | `GET /<id>` — ordinary protocol |
 | `VITE_PROTOCOL_AS_URL` | `/api/protocols-as` | `GET /<id>` — AS protocol |
@@ -171,14 +171,29 @@ origin (what you want when routing through the Vite dev proxy); absolute
 
 **Mocking defaults to on.** A fresh clone with no `.env` runs against mocks
 rather than firing real submissions at a live government service because
-someone forgot to create one. If the mock worker fails to register, the app
-refuses to render rather than quietly falling through to the network.
+someone forgot to create one.
 
 ### The mock backend
 
-[`src/mocks/handlers.ts`](src/mocks/handlers.ts) is a real HTTP mock — MSW
-intercepts at the network layer, so `src/lib/api.ts` runs its actual `fetch`
-calls unchanged. The code exercised against mocks is the code that ships.
+The mock is served by the **dev server itself**
+([`plugins/mock-api.ts`](plugins/mock-api.ts)), as ordinary HTTP routes. It
+also runs under `pnpm preview`, so a preview of the production build behaves
+the same.
+
+`src/lib/api.ts` therefore issues its real `fetch` calls unchanged — the code
+exercised against mocks is the code that ships.
+
+> **Why not MSW's browser worker?** It cannot work on the phone. The dev
+> server's self-signed certificate covers only `localhost` and `127.0.0.1`, so
+> a phone on the LAN IP always hits a certificate error. You can click through
+> the interstitial and the page loads — but browsers **refuse to register a
+> service worker on an origin with a certificate error**, bypassed or not,
+> because a service worker is persistent code. Serving the routes from the dev
+> server sidesteps this entirely and needs nothing installed on the phone.
+>
+> MSW is still the mocking layer for the **test suite**. Both it and the
+> middleware drive the same behaviour in
+> [`src/mocks/scenario.ts`](src/mocks/scenario.ts), so they cannot drift apart.
 
 Failures are deterministic, keyed on the **last two digits** of the number, so
 you can reproduce any path on demand:
@@ -216,7 +231,7 @@ pnpm test:watch   # watch mode
 pnpm test:ui      # browser UI
 ```
 
-Vitest + Testing Library + MSW, 114 tests. Notable coverage:
+Vitest + Testing Library + MSW, 127 tests. Notable coverage:
 
 - **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
   from the reference photo, including the mangled `Nº`; label anchoring
@@ -304,7 +319,12 @@ src/
     EditProtocolDialog.tsx
     ResultsPanel.tsx
     ui/              shadcn/ui primitives
-  mocks/             MSW handlers, browser worker, node server
+  mocks/
+    scenario.ts      what the mock backend does (shared)
+    handlers.ts      MSW handlers for tests
+    server.ts        MSW node server
+plugins/
+  mock-api.ts        serves the mock API from the dev server
 ```
 
 Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui (Radix),
@@ -321,7 +341,6 @@ Tesseract.js, MSW, Vitest.
 | `pnpm test` | run the test suite |
 | `pnpm test:watch` / `pnpm test:ui` | watch mode / browser UI |
 | `pnpm lint` | oxlint |
-| `pnpm msw:init` | reinstall `public/mockServiceWorker.js` |
 
 ---
 
@@ -340,9 +359,12 @@ frame takes about a second, and three need to agree.
 the history with the pencil icon. If it happens often, more light and a flatter,
 less creased slip help more than any setting.
 
-**"Falha ao iniciar o mock (MSW)".** Run `pnpm msw:init` and reload, or set
-`VITE_USE_MOCK=false` to use the real URLs.
+**The mock endpoints 404 / everything fails with "sem ID".** The middleware
+only registers when mocking is on and the paths match. Check `VITE_USE_MOCK`
+is not `false`, that the three URLs match what `plugins/mock-api.ts` was given,
+and restart the dev server — `vite.config.ts` reads the env at startup, so
+changes there need a restart, not just a reload.
 
-**Everything is failing with "sem ID".** The lookup endpoint is unreachable.
-Check `VITE_LOOKUP_URL` and, against a real host, that the proxy in
-`vite.config.ts` is uncommented and pointed at it.
+**Against a real host, everything fails with "sem ID".** The lookup endpoint is
+unreachable. Check `VITE_LOOKUP_URL` and that the proxy in `vite.config.ts` is
+uncommented and pointed at the right target.
