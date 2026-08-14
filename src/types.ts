@@ -46,7 +46,7 @@ export type ProtocolRecord = {
   as: StepState
 }
 
-/** Result of `GET {LOOKUP_URL}?numprotocol=<num>` — resolves a number to an id. */
+/** Result of `GET {LOOKUP_URL}?protocoloId=<num>` — resolves a number to an id. */
 export type LookupResult =
   | { ok: true; id: string }
   | { ok: false; reason: string; httpStatus?: number }

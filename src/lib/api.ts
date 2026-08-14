@@ -1,11 +1,11 @@
+import type { LookupResult, ProtocolResult } from "../types";
 import {
   AUTH_TOKEN,
   LOOKUP_URL,
   PROTOCOL_AS_URL,
   PROTOCOL_URL,
   REQUEST_TIMEOUT_MS,
-} from './config'
-import type { LookupResult, ProtocolResult } from '../types'
+} from "./config";
 
 /**
  * The three backend calls.
@@ -28,7 +28,7 @@ import type { LookupResult, ProtocolResult } from '../types'
  * All three URLs and the token come from `config.ts`, and are set in `.env`.
  */
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
  * The method each call uses.
@@ -40,28 +40,28 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
  * the Content-Type, and the token, and both mock transports already answer any
  * method, so nothing else needs touching.
  */
-const LOOKUP_METHOD: HttpMethod = 'GET'
-const PROTOCOL_METHOD: HttpMethod = 'GET'
-const PROTOCOL_AS_METHOD: HttpMethod = 'GET'
+const LOOKUP_METHOD: HttpMethod = "GET";
+const PROTOCOL_METHOD: HttpMethod = "PUT";
+const PROTOCOL_AS_METHOD: HttpMethod = "PUT";
 
 export type RequestOptions = {
-  method?: HttpMethod
+  method?: HttpMethod;
   /** Merged into the query string. */
-  query?: Record<string, string>
+  query?: Record<string, string>;
   /**
    * Serialised as JSON, with the matching Content-Type. Dropped on GET, which
    * cannot carry a body — `fetch` throws outright rather than ignoring it.
    */
-  body?: unknown
-  signal?: AbortSignal
+  body?: unknown;
+  signal?: AbortSignal;
   /** Used in the error message when the response explains nothing itself. */
-  failure?: string
-}
+  failure?: string;
+};
 
 /** What `request` gives back. Never throws, so callers always get one of these. */
 type RequestOutcome =
   | { ok: true; status: number; body: unknown }
-  | { ok: false; reason: string; httpStatus?: number }
+  | { ok: false; reason: string; httpStatus?: number };
 
 /**
  * Resolve a configured URL against the app's origin.
@@ -71,13 +71,13 @@ type RequestOutcome =
  * so this must happen before every call, not just where it is convenient.
  */
 function resolveUrl(path: string): URL {
-  return new URL(path, globalThis.location?.origin ?? 'http://localhost')
+  return new URL(path, globalThis.location?.origin ?? "http://localhost");
 }
 
 /** Combine the caller's abort signal with a timeout. */
 function withTimeout(signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-  return signal ? AbortSignal.any([signal, timeout]) : timeout
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 /**
@@ -89,27 +89,27 @@ function withTimeout(signal?: AbortSignal): AbortSignal {
  * token is missing.
  */
 function authHeaders(): Record<string, string> {
-  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}
+  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
 }
 
 function describeError(error: unknown): string {
   // Checked by `name` rather than `instanceof DOMException`: the abort errors
   // come from the fetch implementation's own realm, so an instanceof test
   // against the page's DOMException fails and the real reason gets swallowed.
-  const name = (error as { name?: unknown } | null)?.name
-  if (name === 'TimeoutError') return 'Tempo esgotado — servidor não respondeu'
-  if (name === 'AbortError') return 'Cancelado'
-  if (error instanceof Error) return error.message
-  return 'Erro desconhecido'
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === "TimeoutError") return "Tempo esgotado — servidor não respondeu";
+  if (name === "AbortError") return "Cancelado";
+  if (error instanceof Error) return error.message;
+  return "Erro desconhecido";
 }
 
 /** Parse a body as JSON, falling back to the raw text when it is not JSON. */
 function parseBody(text: string): unknown {
-  if (!text.trim()) return null
+  if (!text.trim()) return null;
   try {
-    return JSON.parse(text)
+    return JSON.parse(text);
   } catch {
-    return text
+    return text;
   }
 }
 
@@ -122,23 +122,23 @@ function parseBody(text: string): unknown {
  * caller can fall back rather than show the user a fragment of markup.
  */
 function readDetail(text: string): string {
-  const body = parseBody(text)
-  if (typeof body === 'string') {
+  const body = parseBody(text);
+  if (typeof body === "string") {
     // Anything with markup in it is a proxy's error page, not a message.
-    return body.includes('<') ? '' : body.slice(0, 140).trim()
+    return body.includes("<") ? "" : body.slice(0, 140).trim();
   }
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>
+  if (body && typeof body === "object") {
+    const record = body as Record<string, unknown>;
     const message =
       record.message ??
       record.Message ??
       record.mensagem ??
       record.error ??
       record.erro ??
-      record.detail
-    if (typeof message === 'string') return message.slice(0, 140).trim()
+      record.detail;
+    if (typeof message === "string") return message.slice(0, 140).trim();
   }
-  return ''
+  return "";
 }
 
 /**
@@ -149,44 +149,44 @@ function readDetail(text: string): string {
  */
 async function request(
   path: string,
-  { method = 'GET', query, body, signal, failure }: RequestOptions = {},
+  { method = "GET", query, body, signal, failure }: RequestOptions = {},
 ): Promise<RequestOutcome> {
   try {
-    const url = resolveUrl(path)
+    const url = resolveUrl(path);
     for (const [key, value] of Object.entries(query ?? {})) {
-      url.searchParams.set(key, value)
+      url.searchParams.set(key, value);
     }
 
-    const sendsBody = body !== undefined && method !== 'GET'
+    const sendsBody = body !== undefined && method !== "GET";
 
     const response = await fetch(url, {
       method,
       headers: {
-        Accept: 'application/json',
-        ...(sendsBody ? { 'Content-Type': 'application/json' } : {}),
+        Accept: "application/json",
+        ...(sendsBody ? { "Content-Type": "application/json" } : {}),
         ...authHeaders(),
       },
       body: sendsBody ? JSON.stringify(body) : undefined,
       signal: withTimeout(signal),
-    })
+    });
 
     // Read the body either way — on a failure it usually holds the reason.
-    const text = await response.text().catch(() => '')
+    const text = await response.text().catch(() => "");
 
     if (!response.ok) {
-      const detail = readDetail(text)
+      const detail = readDetail(text);
       return {
         ok: false,
         reason: `HTTP ${response.status} — ${
-          detail || response.statusText || failure || 'falha na requisição'
+          detail || response.statusText || failure || "falha na requisição"
         }`,
         httpStatus: response.status,
-      }
+      };
     }
 
-    return { ok: true, status: response.status, body: parseBody(text) }
+    return { ok: true, status: response.status, body: parseBody(text) };
   } catch (error) {
-    return { ok: false, reason: describeError(error) }
+    return { ok: false, reason: describeError(error) };
   }
 }
 
@@ -200,16 +200,29 @@ async function request(
  * string/number body as the id itself. Narrow this once the real shape is known.
  */
 export function readId(body: unknown): string | null {
-  if (typeof body === 'string' && body.trim()) return body.trim()
-  if (typeof body === 'number') return String(body)
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>
-    const candidate =
-      record.id ?? record.Id ?? record.ID ?? record.protocolId ?? record.idProtocolo
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
-    if (typeof candidate === 'number') return String(candidate)
+  // if it's an array, extract the first found element
+  if (Array.isArray(body)) {
+    body = body[0];
   }
-  return null
+
+  if (typeof body === "string" && body.trim()) return body.trim();
+  if (typeof body === "number") return String(body);
+
+  if (body && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    const candidate =
+      record.id ??
+      record.Id ??
+      record.ID ??
+      record.protocolId ??
+      record.idProtocolo;
+
+    if (typeof candidate === "string" && candidate.trim())
+      return candidate.trim();
+    if (typeof candidate === "number") return String(candidate);
+  }
+
+  return null;
 }
 
 export async function lookupProtocolId(
@@ -220,20 +233,20 @@ export async function lookupProtocolId(
     method: LOOKUP_METHOD,
     // If the service turns out to want a POST, this moves from `query` to
     // `body` — the mock reads the number from either.
-    query: { numprotocol: num },
+    query: { protocoloId: num },
     signal,
-    failure: 'falha na busca',
-  })
+    failure: "falha na busca",
+  });
 
   if (!result.ok) {
-    return { ok: false, reason: result.reason, httpStatus: result.httpStatus }
+    return { ok: false, reason: result.reason, httpStatus: result.httpStatus };
   }
 
-  const id = readId(result.body)
+  const id = readId(result.body);
   if (!id) {
-    return { ok: false, reason: 'Resposta sem id', httpStatus: result.status }
+    return { ok: false, reason: "Resposta sem id", httpStatus: result.status };
   }
-  return { ok: true, id }
+  return { ok: true, id };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,20 +260,20 @@ async function submit(
   label: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  const path = `${baseUrl.replace(/\/$/, '')}/${encodeURIComponent(id)}`
+  const path = `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(id)}`;
 
   const result = await request(path, {
     method,
     // A POST or PUT here would add something like `body: { id }`; `request`
     // serialises it and sets the Content-Type.
     signal,
-    failure: 'falha ao protocolar',
-  })
+    failure: "falha ao protocolar",
+  });
 
   if (!result.ok) {
-    return { ok: false, reason: result.reason, httpStatus: result.httpStatus }
+    return { ok: false, reason: result.reason, httpStatus: result.httpStatus };
   }
-  return { ok: true, reason: `${label} protocolado (HTTP ${result.status})` }
+  return { ok: true, reason: `${label} protocolado (HTTP ${result.status})` };
 }
 
 /** The ordinary protocol. */
@@ -268,7 +281,7 @@ export function protocolById(
   id: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  return submit(PROTOCOL_URL, PROTOCOL_METHOD, id, 'Protocolo', signal)
+  return submit(PROTOCOL_URL, PROTOCOL_METHOD, id, "Protocolo", signal);
 }
 
 /**
@@ -281,5 +294,5 @@ export function protocolAsById(
   id: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  return submit(PROTOCOL_AS_URL, PROTOCOL_AS_METHOD, id, 'AS', signal)
+  return submit(PROTOCOL_AS_URL, PROTOCOL_AS_METHOD, id, "AS", signal);
 }

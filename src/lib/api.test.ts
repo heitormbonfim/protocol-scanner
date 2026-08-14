@@ -34,11 +34,11 @@ describe('readId', () => {
 })
 
 describe('lookupProtocolId', () => {
-  it('sends the number as ?numprotocol and returns the id', async () => {
+  it('sends the number as ?protocoloId and returns the id', async () => {
     let seen: string | null = null
     server.use(
       http.get(LOOKUP_URL, ({ request }) => {
-        seen = new URL(request.url).searchParams.get('numprotocol')
+        seen = new URL(request.url).searchParams.get('protocoloId')
         return HttpResponse.json({ id: 'PRT-1' })
       }),
     )
@@ -240,7 +240,7 @@ describe('mock handlers', () => {
     const response = await fetch(new URL(LOOKUP_URL, location.origin), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numprotocol: NUM }),
+      body: JSON.stringify({ protocoloId: NUM }),
     })
 
     expect(response.status).toBe(200)

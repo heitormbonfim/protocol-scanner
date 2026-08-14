@@ -153,9 +153,9 @@ export function mockApi(options: MockApiOptions): Plugin {
         // The number arrives in the query string on a GET and in the body on
         // anything else, so a lookup switched to POST still resolves.
         const body = await readJsonBody(req)
-        const fromBody = body.numprotocol ?? body.num
+        const fromBody = body.protocoloId ?? body.num
         reply = lookupReply(
-          url.searchParams.get('numprotocol') ??
+          url.searchParams.get('protocoloId') ??
             (typeof fromBody === 'string' ? fromBody : null),
         )
       }

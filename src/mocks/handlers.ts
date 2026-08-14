@@ -30,8 +30,8 @@ function toResponse(reply: MockReply): Response {
  * else, matching `plugins/mock-api.ts`, so a lookup switched to POST resolves
  * under test too.
  */
-async function numprotocolOf(request: Request): Promise<string | null> {
-  const fromQuery = new URL(request.url).searchParams.get('numprotocol')
+async function protocoloIdOf(request: Request): Promise<string | null> {
+  const fromQuery = new URL(request.url).searchParams.get('protocoloId')
   if (fromQuery) return fromQuery
   if (request.method === 'GET' || request.method === 'HEAD') return null
 
@@ -39,7 +39,7 @@ async function numprotocolOf(request: Request): Promise<string | null> {
   if (!text.trim()) return null
   try {
     const body: unknown = JSON.parse(text)
-    const value = (body as Record<string, unknown>)?.numprotocol
+    const value = (body as Record<string, unknown>)?.protocoloId
     return typeof value === 'string' ? value : null
   } catch {
     return null
@@ -50,9 +50,9 @@ async function numprotocolOf(request: Request): Promise<string | null> {
 // in `src/lib/api.ts` and is expected to change, and the mock's job is to
 // answer the route, not to police the verb.
 export const handlers = [
-  // {LOOKUP_URL}?numprotocol=<num> → { id }
+  // {LOOKUP_URL}?protocoloId=<num> → { id }
   http.all(LOOKUP_URL, async ({ request }) =>
-    toResponse(lookupReply(await numprotocolOf(request))),
+    toResponse(lookupReply(await protocoloIdOf(request))),
   ),
 
   // {PROTOCOL_URL}/<id>

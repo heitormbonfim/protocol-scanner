@@ -65,10 +65,10 @@ export function mockIdFor(num: string): string {
   return `PRT-${num.slice(-6)}`
 }
 
-/** `GET {LOOKUP_URL}?numprotocol=<num>` */
+/** `GET {LOOKUP_URL}?protocoloId=<num>` */
 export function lookupReply(num: string | null): MockReply {
   if (!num || !/^\d{15}$/.test(num)) {
-    return { status: 400, type: 'json', body: { message: 'numprotocol inválido' } }
+    return { status: 400, type: 'json', body: { message: 'protocoloId inválido' } }
   }
   if (num.endsWith(LOOKUP_FAILS_ON)) {
     return { status: 503, type: 'json', body: { message: 'Serviço indisponível' } }

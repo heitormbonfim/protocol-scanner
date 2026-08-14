@@ -36,7 +36,7 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
                         CONFIRM SHEET  (photo + digits side by side)
                                │  ✓ Confirmar   [x] Protocolar também AS
                                ▼
-              GET {LOOKUP_URL}?numprotocol=<num>  →  { id }
+              GET {LOOKUP_URL}?protocoloId=<num>  →  { id }
                     (in the background — scanning never waits)
                                ▼
                     saved to history { id, num }
@@ -211,7 +211,7 @@ changing any of them.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VITE_USE_MOCK` | `true` | Serve the mock API from the dev server |
-| `VITE_LOOKUP_URL` | `/api/protocols` | `?numprotocol=<num>` → `{ id }` |
+| `VITE_LOOKUP_URL` | `/api/protocols` | `?protocoloId=<num>` → `{ id }` |
 | `VITE_PROTOCOL_URL` | `/api/protocols` | `/<id>` — ordinary protocol |
 | `VITE_PROTOCOL_AS_URL` | `/api/protocols-as` | `/<id>` — AS protocol |
 | `VITE_AUTH_TOKEN` | *(empty)* | Sent as `Authorization: Bearer <token>` |
