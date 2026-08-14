@@ -9,8 +9,8 @@ import type { ScanCandidate } from '../types'
 /**
  * Breathing room between passes so the main thread can still paint.
  *
- * Full-page recognition takes roughly a second, so this gap is a small share
- * of the loop — the value only needs to be non-zero.
+ * Recognition dominates the loop by far — it reads the aim box, a fraction of
+ * the frame, so this gap only needs to be non-zero.
  */
 const FRAME_GAP_MS = 120
 

@@ -1,3 +1,4 @@
+import { DEFAULT_FIELD_ROI, clampRoiInside, type Roi } from './preprocess'
 import type { ProtocolRecord } from '../types'
 
 /**
@@ -7,9 +8,13 @@ import type { ProtocolRecord } from '../types'
  * Losing it to an accidental refresh, a backgrounded tab, or a phone that
  * decided to reload the page would mean rescanning the whole stack, so it is
  * written to localStorage on every change.
+ *
+ * The aim box lives here too, for a smaller reason: it is lined up with a form
+ * once, and having to redo that on every visit would be tedious.
  */
 
 const RECORDS_KEY = 'protocol-scanner:records'
+const FIELD_ROI_KEY = 'protocol-scanner:field-roi'
 
 /**
  * Accept anything carrying the fields we cannot reconstruct, and fill in the
@@ -68,5 +73,43 @@ export function clearRecords(): void {
     localStorage.removeItem(RECORDS_KEY)
   } catch {
     // As above.
+  }
+}
+
+/**
+ * The aim box, as the user last positioned it.
+ *
+ * Always clamped back inside the guide on the way out, so a box saved by an
+ * older version — or a hand-edited one — cannot leave the scanner reading
+ * pixels outside the frame the user is aiming with.
+ */
+export function loadFieldRoi(): Roi {
+  try {
+    const raw = localStorage.getItem(FIELD_ROI_KEY)
+    if (!raw) return DEFAULT_FIELD_ROI
+
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return DEFAULT_FIELD_ROI
+
+    const roi = parsed as Partial<Roi>
+    const finite = (value: unknown): value is number =>
+      typeof value === 'number' && Number.isFinite(value)
+    if (!finite(roi.x) || !finite(roi.y) || !finite(roi.w) || !finite(roi.h)) {
+      return DEFAULT_FIELD_ROI
+    }
+    // A zero-area box would read nothing and look like a broken scanner.
+    if (roi.w <= 0 || roi.h <= 0) return DEFAULT_FIELD_ROI
+
+    return clampRoiInside({ x: roi.x, y: roi.y, w: roi.w, h: roi.h })
+  } catch {
+    return DEFAULT_FIELD_ROI
+  }
+}
+
+export function saveFieldRoi(roi: Roi): void {
+  try {
+    localStorage.setItem(FIELD_ROI_KEY, JSON.stringify(roi))
+  } catch {
+    // Private browsing or a full quota — the box just resets next visit.
   }
 }

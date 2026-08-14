@@ -26,7 +26,10 @@ Built for working through a physical stack: point, confirm, next.
 ## How it works
 
 ```text
-Dashboard ──▶ Escanear ──▶ camera scans continuously
+Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
+                               │  (once per form — the position sticks)
+                               ▼
+                        camera reads that box continuously
                                │
                         several frames agree
                                ▼
@@ -92,6 +95,33 @@ inside the guide.
 The status pill tells you what is happening: *Procurando o protocolo…*, then
 *Confirmando… 2 de 3*. A second line says how it found the number — "achou o
 campo Protocolo" is the strongest signal.
+
+### The aim box
+
+Inside the guide there is a smaller box marked **Protocolo Nº**. It is the only
+part of the slip that gets read.
+
+**Drag it onto the field once.** The position is remembered, so the next slip of
+the same form needs nothing. Arrow keys nudge it too, and it cannot be dragged
+outside the guide.
+
+It exists because a slip carries **several "Protocolo" labels** — de origem, de
+entrada, whatever the form calls them — and the text alone cannot say which one
+is meant. Every one of them is a "Protocolo" followed by a long number, so
+reading the whole page and taking the first match is a coin flip. Pointing at
+the right one settles it.
+
+Two things follow from the box being small, both good:
+
+- It reads in a fraction of the time a full page took, so the frames needed to
+  agree arrive much faster.
+- The confirm sheet's photo is the band itself — the digits are large and easy
+  to check against what the app read.
+
+This is **not** the thin-strip framing that was tried and abandoned; that one
+failed because filling it forced the phone inside its minimum focus distance.
+Here the phone stays back with the whole slip in the guide, and the crop is
+taken from that same in-focus frame.
 
 ### Focus
 
@@ -286,7 +316,7 @@ pnpm test:watch   # watch mode
 pnpm test:ui      # browser UI
 ```
 
-Vitest + Testing Library + MSW, 140 tests. Notable coverage:
+Vitest + Testing Library + MSW, 162 tests. Notable coverage:
 
 - **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
   from the reference photo, including the mangled `Nº`; label anchoring
@@ -301,7 +331,10 @@ Vitest + Testing Library + MSW, 140 tests. Notable coverage:
 - **`api.test.ts`** — ID field variants, error mapping, URL construction; the
   bearer token on all three calls and its absence when unconfigured; the mocks
   answering a non-GET, so switching a method stays a one-word change.
-- **`storage.test.ts`** — migration of records written by older versions.
+- **`storage.test.ts`** — migration of records written by older versions; the
+  aim box surviving a corrupt or out-of-bounds saved value.
+- **`ScannerView.test.tsx`** — the aim box goes where it is dragged, stays
+  inside the guide, and tells a tap apart from a drag.
 - **`ConfirmSheet.test.tsx`** — the human safety net: photo present, duplicates
   blocked, corrections reported as edited.
 
@@ -324,6 +357,15 @@ the number and did grayscale + Otsu thresholding. Two things were wrong with it:
 
 Reading the whole slip with no binarization took per-frame accuracy from
 **~39% to ~85%**, and cut a confirmed read from ~11 frames to ~2-3.
+
+**What that did and did not settle.** The finding was about *where the phone is
+held*, not about how much of the frame is read — those had simply been the same
+decision. They are now separate: the guide still frames the whole slip, so the
+distance is unchanged, while only the [aim box](#the-aim-box) inside it is
+recognised. The crop comes out of the same in-focus frame, so it keeps the
+accuracy and adds the one thing text alone cannot give — *which* field was
+meant. The figures above were measured full-page and have not been re-measured
+per-band; treat them as the floor.
 
 Three findings worth recording, all of which contradicted the obvious guess:
 
@@ -360,7 +402,7 @@ normal. Anything that slips through is still fixable from the history.
 src/
   lib/
     protocol.ts      label-anchored extraction + validation
-    preprocess.ts    ROI → intrinsic-pixel mapping, crop, scale
+    preprocess.ts    guide + aim box, ROI → intrinsic-pixel mapping, crop
     ocr.ts           Tesseract worker lifecycle
     consensus.ts     multi-frame voting (the misread defence)
     api.ts           the three GET calls
@@ -409,9 +451,13 @@ browser blocks `getUserMedia` entirely. If Android Chrome refuses the
 self-signed certificate, add the origin to
 `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
 
-**It never finds a number.** Get the whole slip in the guide and hold steady for
-a couple of seconds — do not move closer. Use the torch button in dim light. A
-frame takes about a second, and three need to agree.
+**It never finds a number.** First check the **aim box is actually over the
+`Protocolo Nº` field** — nothing outside it is read. Then get the whole slip in
+the guide and hold steady for a couple of seconds; do not move closer. Use the
+torch button in dim light. Three frames have to agree.
+
+**It reads the wrong "Protocolo" off the page.** The aim box is on the wrong
+field. Drag it onto the right one — the position is remembered from then on.
 
 **The picture will not sharpen.** Tap the paper on screen — that runs a focus
 sweep aimed at the point you touched, and a ring marks where. If it is still

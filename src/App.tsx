@@ -7,9 +7,15 @@ import { ScannerView } from '@/components/ScannerView'
 import { useCamera } from '@/hooks/useCamera'
 import { useScanner } from '@/hooks/useScanner'
 import { lookupProtocolId } from '@/lib/api'
-import { SCAN_ROI } from '@/lib/preprocess'
 import { runProtocolQueue, type QueueProgress } from '@/lib/queue'
-import { clearRecords, loadRecords, saveRecords } from '@/lib/storage'
+import {
+  clearRecords,
+  loadFieldRoi,
+  loadRecords,
+  saveFieldRoi,
+  saveRecords,
+} from '@/lib/storage'
+import type { Roi } from '@/lib/preprocess'
 import type { ProtocolRecord, ScanCandidate, StepState, View } from '@/types'
 
 const IDLE_STEP: StepState = { status: 'idle' }
@@ -30,6 +36,8 @@ export default function App() {
    * should be the one that needs no tap. Unticking it sticks just the same.
    */
   const [defaultWithAs, setDefaultWithAs] = useState(true)
+  /** The aim box, kept across sessions: a form is lined up with once. */
+  const [fieldRoi, setFieldRoi] = useState<Roi>(loadFieldRoi)
 
   const camera = useCamera()
   const abortRef = useRef<AbortController | null>(null)
@@ -44,6 +52,7 @@ export default function App() {
   })
 
   useEffect(() => saveRecords(records), [records])
+  useEffect(() => saveFieldRoi(fieldRoi), [fieldRoi])
 
   const flash = useCallback((message: string) => {
     setToast(message)
@@ -100,7 +109,9 @@ export default function App() {
 
   const scanner = useScanner({
     videoRef: camera.videoRef,
-    roi: SCAN_ROI,
+    // Only the aim box is read, not the whole guide: a slip carries several
+    // "Protocolo" labels and position is what tells them apart.
+    roi: fieldRoi,
     enabled: scannerOpen && camera.status === 'active' && !candidate,
     onCandidate: handleCandidate,
   })
@@ -297,9 +308,11 @@ export default function App() {
           torchOn={camera.torchOn}
           torchSupported={camera.torchSupported}
           focusSupported={camera.focusSupported}
+          fieldRoi={fieldRoi}
           onStart={() => void camera.start()}
           onToggleTorch={() => void camera.toggleTorch()}
           onFocusAt={(point) => void camera.focusAt(point)}
+          onFieldRoiChange={setFieldRoi}
           ocrReady={scanner.ready}
           scannerError={scanner.error}
           agreement={scanner.agreement}

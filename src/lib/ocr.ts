@@ -16,9 +16,14 @@ let workerPromise: Promise<Worker> | null = null
 async function buildWorker(): Promise<Worker> {
   const worker = await createWorker('eng')
   await worker.setParameters({
-    // Full page segmentation: we hand Tesseract the whole slip and let its own
-    // layout analysis find the lines. It is markedly better at this than any
-    // cropping we do by hand.
+    // Automatic segmentation: Tesseract's own layout analysis finds the lines,
+    // which it does markedly better than any hand-rolled splitting.
+    //
+    // This was chosen when the input was the whole slip. The input is now the
+    // aim box — a band of a line or two — for which `PSM.SINGLE_BLOCK` is the
+    // conventional choice and may well read better. It is a one-line change,
+    // but an unmeasured one: the accuracy figures in the README came off real
+    // photographs, and this should be swapped only against the same.
     tessedit_pageseg_mode: PSM.AUTO,
     // Deliberately NO character whitelist. An earlier version restricted this
     // to digits, which reads the number marginally better in isolation but

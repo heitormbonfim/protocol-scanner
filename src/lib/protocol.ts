@@ -71,13 +71,18 @@ export function hasPlausibleDatePrefix(num: string): boolean {
 }
 
 /**
- * Find the protocol number in a page of OCR text.
+ * Find the protocol number in the OCR text.
+ *
+ * The text comes from the aim box, not the whole slip, and that division of
+ * labour matters: a slip carries several "Protocolo" labels, and no amount of
+ * reading can say which one is meant — only *where the user pointed* can. So
+ * position picks the field, and the strategies below only have to read it.
  *
  * Strategies in descending order of confidence:
  *
  *  1. **Anchored** — digits immediately following the "Protocolo" label. This
  *     is the only strategy that knows *which* number it found, so it stays
- *     correct even on a slip carrying several long numbers.
+ *     correct even when the box catches more than the one field.
  *  2. **Dated** — any bare 15-digit run whose date prefix parses.
  *  3. **Loose** — any bare 15-digit run. Held to a higher agreement bar.
  *  4. **Salvaged** — a 16-17 digit run containing a date-valid 15-digit

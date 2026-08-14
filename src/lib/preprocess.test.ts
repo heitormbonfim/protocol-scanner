@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SCAN_ROI, pointToSourceFraction, roiToSourceRect } from './preprocess'
+import {
+  DEFAULT_FIELD_ROI,
+  SCAN_ROI,
+  clampRoiInside,
+  pointToSourceFraction,
+  roiToSourceRect,
+} from './preprocess'
 
 /**
  * `roiToSourceRect` maps the framing box the user sees onto the video's
@@ -166,5 +172,53 @@ describe('SCAN_ROI', () => {
     // phone closer than its minimum focus distance and every frame comes back
     // blurred. If someone shrinks this back into a thin strip, this fails.
     expect(SCAN_ROI.w * SCAN_ROI.h).toBeGreaterThan(0.5)
+  })
+})
+
+describe('clampRoiInside', () => {
+  /**
+   * The aim box is dragged by hand and persisted, so it is the one region that
+   * can arrive at `preprocessFrame` holding anything at all. A box outside the
+   * guide reads pixels the user is not framing, and the only symptom is a
+   * scanner that quietly finds nothing.
+   */
+  it('leaves a box that already fits alone', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
+  })
+
+  it('pulls a box back inside when dragged off each edge', () => {
+    const right = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: 5 })
+    expect(right.x + right.w).toBeCloseTo(SCAN_ROI.x + SCAN_ROI.w, 5)
+
+    const left = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: -5 })
+    expect(left.x).toBeCloseTo(SCAN_ROI.x, 5)
+
+    const below = clampRoiInside({ ...DEFAULT_FIELD_ROI, y: 5 })
+    expect(below.y + below.h).toBeCloseTo(SCAN_ROI.y + SCAN_ROI.h, 5)
+
+    const above = clampRoiInside({ ...DEFAULT_FIELD_ROI, y: -5 })
+    expect(above.y).toBeCloseTo(SCAN_ROI.y, 5)
+  })
+
+  it('keeps the size when only the position is out of bounds', () => {
+    const clamped = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: 9, y: 9 })
+    expect(clamped.w).toBe(DEFAULT_FIELD_ROI.w)
+    expect(clamped.h).toBe(DEFAULT_FIELD_ROI.h)
+  })
+
+  it('shrinks a box too large for the guide rather than overflowing it', () => {
+    const clamped = clampRoiInside({ x: 0, y: 0, w: 3, h: 3 })
+    expect(clamped).toEqual(SCAN_ROI)
+  })
+})
+
+describe('DEFAULT_FIELD_ROI', () => {
+  it('starts inside the document guide', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
+  })
+
+  it('is a band, not a pinhole — a wrapped field still has to fit', () => {
+    expect(DEFAULT_FIELD_ROI.w).toBeGreaterThan(0.5)
+    expect(DEFAULT_FIELD_ROI.h).toBeGreaterThan(0.1)
   })
 })

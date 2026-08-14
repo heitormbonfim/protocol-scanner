@@ -10,8 +10,8 @@
  * image.
  *
  * So the guide is now a large document frame — hold the phone at a comfortable
- * distance with the whole slip in view — and the number is located in software
- * by anchoring on the "Protocolo" label (see `extractProtocol`).
+ * distance with the whole slip in view — and the field is picked out *within*
+ * that frame, by the aim box below, rather than by moving the phone closer.
  *
  * ## Why there is no binarization here
  *
@@ -23,6 +23,25 @@
  * accuracy from ~39% to ~85%.
  */
 
+/**
+ * ## Two regions, and why
+ *
+ * The guide the user frames with and the region actually read are **not** the
+ * same box, and separating them is what makes both problems solvable at once:
+ *
+ *  - `SCAN_ROI` — the document guide. Large, so the phone stays at a distance
+ *    where it can focus. It decides *where the user holds the phone*.
+ *  - `FIELD_ROI` — the aim box, inside the guide. It decides *which pixels are
+ *    read*, and it exists because a slip carries several "Protocolo" labels;
+ *    text alone cannot say which one is the one, but position can.
+ *
+ * The crop is taken from the same full-distance frame, so pointing at a small
+ * region costs nothing in focus — the earlier version's failure was the phone
+ * being held inside its minimum focus distance to fill a small guide, not the
+ * cropping itself. Reading less of the frame is also faster, and spends more
+ * pixels per digit.
+ */
+
 /** Region of interest, as fractions (0..1) of the *displayed* video box. */
 export type Roi = { x: number; y: number; w: number; h: number }
 
@@ -32,6 +51,34 @@ export type Roi = { x: number; y: number; w: number; h: number }
  * minimum focus distance.
  */
 export const SCAN_ROI: Roi = { x: 0.04, y: 0.06, w: 0.92, h: 0.86 }
+
+/**
+ * Where the `Protocolo Nº` field goes — the only part of the slip read.
+ *
+ * A starting position, not a fixed one: forms put the field in different
+ * places, so the user drags the box onto it once and the position is
+ * remembered (see `loadFieldRoi`). A band rather than a tight box, so a field
+ * that wraps onto a second line still lands inside it.
+ */
+export const DEFAULT_FIELD_ROI: Roi = { x: 0.08, y: 0.28, w: 0.84, h: 0.16 }
+
+/**
+ * Keep a region inside the guide.
+ *
+ * The aim box is dragged by hand, and one that wandered outside the guide would
+ * read pixels the user was never framing — the scanner would simply stop
+ * finding anything, with nothing on screen to explain why.
+ */
+export function clampRoiInside(roi: Roi, bounds: Roi = SCAN_ROI): Roi {
+  const w = Math.min(roi.w, bounds.w)
+  const h = Math.min(roi.h, bounds.h)
+  return {
+    x: Math.max(bounds.x, Math.min(roi.x, bounds.x + bounds.w - w)),
+    y: Math.max(bounds.y, Math.min(roi.y, bounds.y + bounds.h - h)),
+    w,
+    h,
+  }
+}
 
 /**
  * Width to normalise the crop to before OCR.
