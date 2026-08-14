@@ -5,14 +5,27 @@ import { pendingRecords, recordOutcomes, runProtocolQueue } from './queue'
 import { server } from '../mocks/server'
 import type { ProtocolRecord } from '../types'
 
-/** Records every request the queue makes, in order. */
+/** Records every request the queue makes, in order, as absolute URLs. */
 function trackRequests() {
   const calls: string[] = []
   server.events.on('request:start', ({ request }) => {
-    const path = new URL(request.url).pathname
-    calls.push(path)
+    calls.push(request.url)
   })
   return calls
+}
+
+/**
+ * The absolute URL a configured endpoint resolves to, built exactly as
+ * `resolveUrl` in `api.ts` builds it.
+ *
+ * Endpoints may be relative or absolute depending on the environment, so these
+ * assertions compare resolved URLs rather than bare pathnames. Exact matches
+ * rather than `startsWith`, too: the AS endpoint's path routinely begins with
+ * the ordinary one's (`…/protocols` and `…/protocols-as`), so a prefix test
+ * cannot tell the two apart.
+ */
+function endpoint(path: string): string {
+  return new URL(path, location.origin).href
 }
 
 function makeRecord(overrides: Partial<ProtocolRecord> = {}): ProtocolRecord {
@@ -59,16 +72,15 @@ describe('runProtocolQueue — the AS rule', () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: false })])
 
-    expect(calls.some((path) => path.startsWith(PROTOCOL_AS_URL))).toBe(false)
-    expect(calls.some((path) => path.startsWith(PROTOCOL_URL))).toBe(true)
+    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217719`)])
   })
 
   it('calls the ordinary protocol BEFORE AS, never the other way round', async () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: true })])
 
-    const protocolAt = calls.findIndex((p) => p === `${PROTOCOL_URL}/PRT-217719`)
-    const asAt = calls.findIndex((p) => p === `${PROTOCOL_AS_URL}/PRT-217719`)
+    const protocolAt = calls.indexOf(endpoint(`${PROTOCOL_URL}/PRT-217719`))
+    const asAt = calls.indexOf(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
     expect(protocolAt).toBeGreaterThanOrEqual(0)
     expect(asAt).toBeGreaterThan(protocolAt)
   })
@@ -76,14 +88,14 @@ describe('runProtocolQueue — the AS rule', () => {
   it('does NOT send AS when the ordinary protocol fails', async () => {
     // The core invariant: AS is an add-on, never valid on its own.
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${PROTOCOL_URL}/:id`, () =>
         HttpResponse.text('falhou', { status: 500 }),
       ),
     )
     const calls = trackRequests()
     const outcomes = await runProtocolQueue([makeRecord({ withAs: true })])
 
-    expect(calls.some((path) => path.startsWith(PROTOCOL_AS_URL))).toBe(false)
+    expect(calls).not.toContain(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
 
     const as = outcomes.find((outcome) => outcome.kind === 'as')
     expect(as?.ok).toBe(false)
@@ -124,7 +136,7 @@ describe('runProtocolQueue — the AS rule', () => {
       makeRecord({ withAs: true, protocol: { status: 'success' } }),
     ])
 
-    expect(calls).toEqual([`${PROTOCOL_AS_URL}/PRT-217719`])
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
   })
 })
 
@@ -133,7 +145,7 @@ describe('runProtocolQueue — sequencing', () => {
     let inFlight = 0
     let maxInFlight = 0
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, async () => {
+      http.all(`${PROTOCOL_URL}/:id`, async () => {
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         await new Promise((resolve) => setTimeout(resolve, 5))
@@ -170,7 +182,7 @@ describe('runProtocolQueue — sequencing', () => {
     const calls = trackRequests()
 
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () => {
+      http.all(`${PROTOCOL_URL}/:id`, () => {
         controller.abort()
         return HttpResponse.json({ ok: true })
       }),

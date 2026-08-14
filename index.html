@@ -10,6 +10,25 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="theme-color" content="#101116" />
+
+    <!-- Installable. The worker itself is registered from src/main.tsx, and
+         only in a production build — see public/sw.js for why. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS ignores the manifest for the home-screen icon and for standalone
+         display, so both have to be stated again here. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Protocolos" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+
+    <meta
+      name="description"
+      content="Lê o número do protocolo em fichas de papel pela câmera, guarda o histórico e protocola o lote inteiro."
+    />
     <title>Leitor de Protocolos</title>
   </head>
   <body>

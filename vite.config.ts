@@ -13,6 +13,23 @@ export default defineConfig(({ mode }) => {
   // Mirrors the default in src/lib/config.ts: mocked unless explicitly off.
   const useMock = env.VITE_USE_MOCK !== 'false'
 
+  /**
+   * HTTPS is the default, because `getUserMedia` needs a secure context and a
+   * phone reaches this over the LAN IP.
+   *
+   * `HTTPS=false` serves plain HTTP instead, which is useful for exactly one
+   * thing: exercising the installed PWA. A browser refuses to register a
+   * service worker on an origin with a certificate error, so the self-signed
+   * LAN server can never run one — but `http://localhost` counts as a secure
+   * context, so there the worker *and* the camera both work. See the README,
+   * "Testing the PWA", and `pnpm preview:pwa`.
+   *
+   * Read from `process.env` rather than `loadEnv` on purpose: it is a property
+   * of how you are running the server, not app configuration, and it has no
+   * business in a `.env` file that also carries endpoints and a token.
+   */
+  const useHttps = process.env.HTTPS !== 'false'
+
   return {
     plugins: [
       react(),
@@ -26,7 +43,7 @@ export default defineConfig(({ mode }) => {
       // the LAN IP always sees a certificate warning. That is expected and
       // harmless here — but it is also why mocking must not rely on a service
       // worker; see plugins/mock-api.ts.
-      basicSsl(),
+      ...(useHttps ? [basicSsl()] : []),
       // Answers the three mock endpoints from the dev server itself.
       mockApi({
         enabled: useMock,

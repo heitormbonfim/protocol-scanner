@@ -33,12 +33,15 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 /**
  * The method each call uses.
  *
- * All three are GET today because that is what the service was specified with,
- * but the submissions in particular are the kind of thing that turns out to
- * want POST. Switching one is a one-word edit here, plus a `body` at the call
- * site if the service wants a payload — `request` handles the serialisation,
- * the Content-Type, and the token, and both mock transports already answer any
- * method, so nothing else needs touching.
+ * The lookup is a GET; both submissions are PUT, which is what the live service
+ * accepts. Switching one is a one-word edit here, plus a `body` at the call site
+ * if the service wants a payload — `request` handles the serialisation, the
+ * Content-Type, and the token, and both mock transports answer any method, so
+ * nothing else needs touching.
+ *
+ * These three verbs are asserted in `api.test.ts` ("HTTP methods"). Every other
+ * handler in the suite is method-agnostic, so that one test is what stands
+ * between a careless edit here and a silent failure in production.
  */
 const LOOKUP_METHOD: HttpMethod = "GET";
 const PROTOCOL_METHOD: HttpMethod = "PUT";

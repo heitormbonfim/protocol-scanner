@@ -6,6 +6,18 @@ import { server } from '../mocks/server'
 
 const NUM = '202601300217719'
 
+/**
+ * The absolute URL a configured endpoint resolves to, built exactly as
+ * `resolveUrl` in `api.ts` builds it.
+ *
+ * Endpoints come from the environment and may be relative (`/api/protocols`)
+ * or absolute (a real service). Comparing resolved URLs rather than bare
+ * pathnames keeps these assertions true under either.
+ */
+function endpoint(path: string): string {
+  return new URL(path, location.origin).href
+}
+
 describe('readId', () => {
   it.each([
     ['lowercase id', { id: 'abc' }],
@@ -37,7 +49,7 @@ describe('lookupProtocolId', () => {
   it('sends the number as ?protocoloId and returns the id', async () => {
     let seen: string | null = null
     server.use(
-      http.get(LOOKUP_URL, ({ request }) => {
+      http.all(LOOKUP_URL, ({ request }) => {
         seen = new URL(request.url).searchParams.get('protocoloId')
         return HttpResponse.json({ id: 'PRT-1' })
       }),
@@ -50,7 +62,7 @@ describe('lookupProtocolId', () => {
 
   it('reports an HTTP failure with its status', async () => {
     server.use(
-      http.get(LOOKUP_URL, () => HttpResponse.json({}, { status: 503 })),
+      http.all(LOOKUP_URL, () => HttpResponse.json({}, { status: 503 })),
     )
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
@@ -58,14 +70,14 @@ describe('lookupProtocolId', () => {
   })
 
   it('treats a 200 with no id as a failure rather than a success', async () => {
-    server.use(http.get(LOOKUP_URL, () => HttpResponse.json({ nada: true })))
+    server.use(http.all(LOOKUP_URL, () => HttpResponse.json({ nada: true })))
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toMatch(/sem id/i)
   })
 
   it('reports a network error instead of throwing', async () => {
-    server.use(http.get(LOOKUP_URL, () => HttpResponse.error()))
+    server.use(http.all(LOOKUP_URL, () => HttpResponse.error()))
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
   })
@@ -81,49 +93,49 @@ describe('lookupProtocolId', () => {
 
 describe('protocolById / protocolAsById', () => {
   it('appends the id as a path segment on the ordinary endpoint', async () => {
-    let path: string | null = null
+    let url: string | null = null
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, ({ request }) => {
-        path = new URL(request.url).pathname
+      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+        url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     const result = await protocolById('PRT-1')
-    expect(path).toBe(`${PROTOCOL_URL}/PRT-1`)
+    expect(url).toBe(endpoint(`${PROTOCOL_URL}/PRT-1`))
     expect(result.ok).toBe(true)
   })
 
   it('uses the separate AS endpoint, not the ordinary one', async () => {
-    let path: string | null = null
+    let url: string | null = null
     server.use(
-      http.get(`${PROTOCOL_AS_URL}/:id`, ({ request }) => {
-        path = new URL(request.url).pathname
+      http.all(`${PROTOCOL_AS_URL}/:id`, ({ request }) => {
+        url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     await protocolAsById('PRT-1')
-    expect(path).toBe(`${PROTOCOL_AS_URL}/PRT-1`)
+    expect(url).toBe(endpoint(`${PROTOCOL_AS_URL}/PRT-1`))
     expect(PROTOCOL_AS_URL).not.toBe(PROTOCOL_URL)
   })
 
   it('percent-encodes an id with awkward characters', async () => {
-    let path: string | null = null
+    let url: string | null = null
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, ({ request }) => {
-        path = new URL(request.url).pathname
+      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+        url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     await protocolById('a/b c')
-    expect(path).toBe(`${PROTOCOL_URL}/a%2Fb%20c`)
+    expect(url).toBe(endpoint(`${PROTOCOL_URL}/a%2Fb%20c`))
   })
 
   it("surfaces the service's own error text, which is more useful than a code", async () => {
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${PROTOCOL_URL}/:id`, () =>
         HttpResponse.text('Protocolo já processado', { status: 409 }),
       ),
     )
@@ -136,7 +148,7 @@ describe('protocolById / protocolAsById', () => {
 
   it('digs the message out of a JSON error envelope', async () => {
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${PROTOCOL_URL}/:id`, () =>
         HttpResponse.json({ message: 'Protocolo bloqueado' }, { status: 403 }),
       ),
     )
@@ -148,7 +160,7 @@ describe('protocolById / protocolAsById', () => {
   it('does not show the user a fragment of an HTML error page', async () => {
     // What a proxy or gateway returns when the real service is unreachable.
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${PROTOCOL_URL}/:id`, () =>
         HttpResponse.text('<!doctype html><title>502 Bad Gateway</title>', {
           status: 502,
         }),
@@ -158,6 +170,56 @@ describe('protocolById / protocolAsById', () => {
     const result = await protocolById('PRT-1')
     expect(result.reason).not.toContain('<')
     if (!result.ok) expect(result.httpStatus).toBe(502)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('HTTP methods', () => {
+  /**
+   * The verb for each call is a constant at the top of `api.ts`. Production
+   * answers the lookup on GET and both submissions on PUT, so that is pinned
+   * here: every other handler in this file is `http.all` and would happily
+   * answer the wrong verb, which is how a change to those constants could
+   * otherwise reach production without a single test going red.
+   */
+  it('sends GET for the lookup and PUT for both submissions', async () => {
+    const seen: Record<string, string> = {}
+    server.use(
+      http.all(LOOKUP_URL, ({ request }) => {
+        seen.lookup = request.method
+        return HttpResponse.json({ id: 'PRT-1' })
+      }),
+      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+        seen.protocol = request.method
+        return HttpResponse.json({ ok: true })
+      }),
+      http.all(`${PROTOCOL_AS_URL}/:id`, ({ request }) => {
+        seen.as = request.method
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+
+    await lookupProtocolId(NUM)
+    await protocolById('PRT-1')
+    await protocolAsById('PRT-1')
+
+    expect(seen).toEqual({ lookup: 'GET', protocol: 'PUT', as: 'PUT' })
+  })
+
+  it('sends no request body on a GET, which cannot carry one', async () => {
+    let hadBody: boolean | null = null
+    server.use(
+      http.all(LOOKUP_URL, ({ request }) => {
+        hadBody = request.body !== null
+        return HttpResponse.json({ id: 'PRT-1' })
+      }),
+    )
+
+    await lookupProtocolId(NUM)
+    expect(hadBody).toBe(false)
   })
 })
 

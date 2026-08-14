@@ -18,3 +18,25 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+/*
+ * The service worker, which is what makes this installable and usable offline.
+ *
+ * Production builds only, for the same reason the mocks are not a worker: a
+ * browser refuses to register one on an origin with a certificate error, and
+ * the self-signed LAN dev server is exactly that. Registering in dev would
+ * only ever produce a console error, and a worker caching the dev server's
+ * output would fight Vite's own reloads.
+ *
+ * Registration waits for `load` so it never competes with the first render or
+ * with the camera coming up. See `public/sw.js` for the caching rules — the
+ * important one being that API traffic is never cached.
+ */
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+      // Not fatal: the app works exactly as before, just without offline use.
+      console.warn('Service worker registration failed:', error)
+    })
+  })
+}

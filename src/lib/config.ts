@@ -18,11 +18,11 @@ export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 /** `GET {LOOKUP_URL}?protocoloId=<num>` → resolves a number to its id. */
 export const LOOKUP_URL = import.meta.env.VITE_LOOKUP_URL ?? "/api/protocols";
 
-/** `GET {PROTOCOL_URL}/<id>` → the ordinary protocol submission. */
+/** `PUT {PROTOCOL_URL}/<id>` → the ordinary protocol submission. */
 export const PROTOCOL_URL = import.meta.env.VITE_PROTOCOL_URL ?? "/api/protocols";
 
 /**
- * `GET {PROTOCOL_AS_URL}/<id>` → the AS submission.
+ * `PUT {PROTOCOL_AS_URL}/<id>` → the AS submission.
  *
  * A separate service from the ordinary one, and never valid on its own: see
  * `runProtocolQueue` for the ordering rule that enforces it.
