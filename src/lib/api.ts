@@ -5,6 +5,7 @@ import {
   PROTOCOL_AS_URL,
   PROTOCOL_URL,
   REQUEST_TIMEOUT_MS,
+  USE_MOCK,
 } from "./config";
 
 /**
@@ -73,14 +74,76 @@ type RequestOutcome =
  * outside a browser (jsdom under test, for one) rejects relative URLs outright,
  * so this must happen before every call, not just where it is convenient.
  */
-function resolveUrl(path: string): URL {
-  return new URL(path, globalThis.location?.origin ?? "http://localhost");
+function appOrigin(): string {
+  return globalThis.location?.origin ?? "http://localhost";
 }
 
-/** Combine the caller's abort signal with a timeout. */
+function resolveUrl(path: string): URL {
+  return new URL(path, appOrigin());
+}
+
+/**
+ * A timeout signal, without requiring `AbortSignal.timeout`.
+ *
+ * That static is Safari 16+. The fallback aborts with a `TimeoutError`, which
+ * is the name `describeError` matches on — get it wrong and a timeout on an
+ * older phone reports itself as a generic failure.
+ */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(ms);
+  }
+
+  const controller = new AbortController();
+  setTimeout(() => {
+    controller.abort(
+      new DOMException("Tempo esgotado", "TimeoutError"),
+    );
+  }, ms);
+  return controller.signal;
+}
+
+/**
+ * The first of several signals to abort, without requiring `AbortSignal.any`.
+ *
+ * The caller's reason is forwarded rather than replaced, so a user cancel still
+ * arrives as an `AbortError` and a timeout as a `TimeoutError`.
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    // `once` so the listener releases as soon as it fires. A caller signal that
+    // outlives the request — the queue reuses one across a whole run — holds at
+    // most one listener per request until the run ends.
+    signal.addEventListener("abort", () => controller.abort(signal.reason), {
+      once: true,
+    });
+  }
+
+  return controller.signal;
+}
+
+/**
+ * Combine the caller's abort signal with a timeout.
+ *
+ * `AbortSignal.any` is Safari 17.4+ (iOS 17.4, March 2024) and
+ * `AbortSignal.timeout` is Safari 16+, both newer than plenty of the phones
+ * this runs on. Without the fallbacks every request throws a `TypeError`
+ * outright on an older iPhone — the app loads and then nothing submits.
+ */
 function withTimeout(signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const timeout = timeoutSignal(REQUEST_TIMEOUT_MS);
+  if (!signal) return timeout;
+
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signal, timeout]);
+  }
+  return anySignal([signal, timeout]);
 }
 
 /**
@@ -156,6 +219,30 @@ async function request(
 ): Promise<RequestOutcome> {
   try {
     const url = resolveUrl(path);
+
+    /*
+     * While mocking, nothing may leave this origin.
+     *
+     * The mock is the dev server, so a request to any other origin has escaped
+     * it — and for the two submissions that means a real protocol filed against
+     * a live government service while the developer believes nothing is being
+     * sent. `config.ts` already rewrites absolute endpoints to paths so this
+     * should be unreachable; it is here because "should be unreachable" is not
+     * good enough when the failure is an irreversible real submission.
+     *
+     * Refused rather than thrown, so it surfaces as an ordinary failure the
+     * report can show, and refused *before* `fetch`, so nothing goes out.
+     */
+    if (USE_MOCK && url.origin !== appOrigin()) {
+      return {
+        ok: false,
+        reason:
+          `Bloqueado: VITE_USE_MOCK está ligado, mas ${url.origin} não é a ` +
+          `origem do app. Nada foi enviado. Use uma URL relativa ` +
+          `(ex.: /api/protocols) ou desligue o mock.`,
+      };
+    }
+
     for (const [key, value] of Object.entries(query ?? {})) {
       url.searchParams.set(key, value);
     }

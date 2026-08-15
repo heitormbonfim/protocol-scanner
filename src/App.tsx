@@ -7,7 +7,13 @@ import { ScannerView } from '@/components/ScannerView'
 import { useCamera } from '@/hooks/useCamera'
 import { useScanner } from '@/hooks/useScanner'
 import { lookupProtocolId } from '@/lib/api'
-import { runProtocolQueue, type QueueProgress } from '@/lib/queue'
+import { USE_MOCK } from '@/lib/config'
+import {
+  pendingRecords,
+  runProtocolQueue,
+  type QueueProgress,
+} from '@/lib/queue'
+import { seedMockRecords } from '@/mocks/seed'
 import {
   clearRecords,
   loadFieldRoi,
@@ -23,12 +29,21 @@ const IDLE_STEP: StepState = { status: 'idle' }
 export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [scannerOpen, setScannerOpen] = useState(false)
-  const [records, setRecords] = useState<ProtocolRecord[]>(loadRecords)
+  /*
+   * With mocking on, start from a sample history rather than an empty one, so
+   * the queue and the report can be exercised without a camera or paper. Seeded
+   * once per browser and never while mocking is off — see mocks/seed.ts.
+   */
+  const [records, setRecords] = useState<ProtocolRecord[]>(() => {
+    const stored = loadRecords()
+    return USE_MOCK ? seedMockRecords(stored) : stored
+  })
   const [candidate, setCandidate] = useState<ScanCandidate | null>(null)
   const [editingNum, setEditingNum] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<QueueProgress | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  /** Slips confirmed since the camera was opened, shown on the scanner. */
   const [sessionCount, setSessionCount] = useState(0)
   /**
    * Sticky AS choice, so a run of AS slips does not need re-ticking each page.
@@ -145,12 +160,19 @@ export default function App() {
           lookup: { status: 'pending' },
           protocol: IDLE_STEP,
           as: IDLE_STEP,
+          protocoled: false,
+          asProtocoled: false,
         },
         // Newest first: the row just scanned should be the one you can see.
         ...current,
       ])
       setDefaultWithAs(withAs)
       setSessionCount((count) => count + 1)
+      // The camera stays up: the point of the app is working through a stack,
+      // and closing it after every slip would mean reopening and re-warming the
+      // camera for each page. Protocolling is still never offered here — the
+      // dashboard behind is inert, and the scanner's own button closes the
+      // camera before a run starts.
       setCandidate(null)
       void runLookup(num)
     },
@@ -174,6 +196,11 @@ export default function App() {
                 lookup: { status: 'pending' },
                 protocol: IDLE_STEP,
                 as: IDLE_STEP,
+                // The only place these are cleared: a corrected number means a
+                // different id, so whatever was filed was filed for something
+                // else and this record has not been protocolled at all.
+                protocoled: false,
+                asProtocoled: false,
               }
             : record,
         ),
@@ -197,6 +224,20 @@ export default function App() {
     [updateRecord],
   )
 
+  const handleToggleSelected = useCallback(
+    (num: string) => {
+      updateRecord(num, (record) => ({
+        ...record,
+        selected: record.selected === false,
+      }))
+    },
+    [updateRecord],
+  )
+
+  const handleSelectAll = useCallback((selected: boolean) => {
+    setRecords((current) => current.map((record) => ({ ...record, selected })))
+  }, [])
+
   const handleClearHistory = useCallback(() => {
     clearRecords()
     setRecords([])
@@ -218,7 +259,11 @@ export default function App() {
           if (next.current) {
             setRecords((current) =>
               current.map((record) =>
-                record.num === next.current
+                // Never over an already-filed protocol: a record queued only
+                // for its pending AS would have its `success` replaced by a
+                // `running` that nothing settles, and the next run would file
+                // the protocol a second time.
+                record.num === next.current && record.protocoled !== true
                   ? { ...record, protocol: { status: 'running' } }
                   : record,
               ),
@@ -234,9 +279,19 @@ export default function App() {
                 reason: outcome.reason,
                 at: Date.now(),
               }
+              // `protocoled` only ever goes from false to true here — it is the
+              // durable record that something was actually filed.
               return outcome.kind === 'as'
-                ? { ...record, as: step }
-                : { ...record, protocol: step }
+                ? {
+                    ...record,
+                    as: step,
+                    asProtocoled: record.asProtocoled === true || outcome.ok,
+                  }
+                : {
+                    ...record,
+                    protocol: step,
+                    protocoled: record.protocoled === true || outcome.ok,
+                  }
             }),
           )
         },
@@ -253,6 +308,20 @@ export default function App() {
   const handleProtocolAll = useCallback(() => {
     void runQueue(recordsRef.current)
   }, [runQueue])
+
+  /**
+   * Finish scanning and send, in one tap.
+   *
+   * The camera is closed *first*, deliberately. A run started with the scanner
+   * still up would leave the phone pointed at paper while submissions go out
+   * behind an opaque overlay — no progress bar, no Parar, no idea whether it
+   * worked. Closing first puts the dashboard in front of you before the first
+   * request leaves.
+   */
+  const handleProtocolFromScanner = useCallback(() => {
+    closeScanner()
+    handleProtocolAll()
+  }, [closeScanner, handleProtocolAll])
 
   const handleRetryFailed = useCallback(() => {
     const reset = recordsRef.current.map((record) => ({
@@ -275,30 +344,42 @@ export default function App() {
 
   return (
     <>
-      {view === 'dashboard' ? (
-        <Dashboard
-          records={records}
-          running={running}
-          progress={progress}
-          onOpenScanner={openScanner}
-          onEdit={setEditingNum}
-          onToggleAs={handleToggleAs}
-          onRetryLookup={(num) => void runLookup(num)}
-          onDelete={(num) =>
-            setRecords((current) => current.filter((record) => record.num !== num))
-          }
-          onClearHistory={handleClearHistory}
-          onProtocolAll={handleProtocolAll}
-          onAbort={() => abortRef.current?.abort()}
-          onViewResults={() => setView('results')}
-        />
-      ) : (
-        <ResultsPanel
-          records={records}
-          onRetryFailed={handleRetryFailed}
-          onBack={() => setView('dashboard')}
-        />
-      )}
+      {/*
+        Inert while the camera is up. The scanner covers the screen, so this is
+        not about what you can see — it is about the dashboard's controls still
+        being reachable by keyboard and by assistive tech underneath it.
+        "Protocolar" must not be pressable while scanning.
+      */}
+      <div inert={scannerOpen || undefined}>
+        {view === 'dashboard' ? (
+          <Dashboard
+            records={records}
+            running={running}
+            progress={progress}
+            onOpenScanner={openScanner}
+            onEdit={setEditingNum}
+            onToggleAs={handleToggleAs}
+            onToggleSelected={handleToggleSelected}
+            onSelectAll={handleSelectAll}
+            onRetryLookup={(num) => void runLookup(num)}
+            onDelete={(num) =>
+              setRecords((current) =>
+                current.filter((record) => record.num !== num),
+              )
+            }
+            onClearHistory={handleClearHistory}
+            onProtocolAll={handleProtocolAll}
+            onAbort={() => abortRef.current?.abort()}
+            onViewResults={() => setView('results')}
+          />
+        ) : (
+          <ResultsPanel
+            records={records}
+            onRetryFailed={handleRetryFailed}
+            onBack={() => setView('dashboard')}
+          />
+        )}
+      </div>
 
       {scannerOpen && (
         <ScannerView
@@ -320,6 +401,8 @@ export default function App() {
           source={scanner.source}
           paused={candidate !== null}
           scannedThisSession={sessionCount}
+          pendingCount={pendingRecords(records).length}
+          onProtocol={handleProtocolFromScanner}
           onClose={closeScanner}
         />
       )}

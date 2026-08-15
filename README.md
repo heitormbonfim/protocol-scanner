@@ -1,10 +1,30 @@
-# Leitor de Protocolos
+<div align="center">
 
-Reads the `Protocolo Nº:` field off paper slips with a phone camera, keeps a
-history you can search and correct, then submits the whole batch one at a time
-and reports exactly what succeeded and what failed.
+# 📄 Leitor de Protocolos
 
-Built for working through a physical stack: point, confirm, next.
+**Reads the `Protocolo Nº` field off paper slips with a phone camera, then files
+the whole stack — one request at a time, with a report of exactly what landed.**
+
+Built for working through a physical pile: *point, confirm, next.*
+
+![React 19](https://img.shields.io/badge/React-19-087ea4?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-4-06b6d4?logo=tailwindcss&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8?logo=pwa&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-236%20passing-3fb950)
+
+</div>
+
+---
+
+> **Three guarantees the code is built around**
+>
+> | | |
+> | --- | --- |
+> | 🔒 **AS is never alone** | The AS submission only ever follows a successful ordinary protocol — [details](#the-as-rule) |
+> | 🔁 **Nothing is filed twice** | A filed protocol is remembered in a sticky flag, so no rerun, reload or abort can resend it — [details](#nothing-is-ever-filed-twice) |
+> | 🧪 **Mocking is all-or-nothing** | With mocks on, nothing can reach a real service — [details](#mocking-cannot-be-half-on) |
 
 ---
 
@@ -43,9 +63,11 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
                                ▼
                     saved to history { id, num }
                                │
-                        …next slip…
+                        …next slip…  (the camera stays up)
                                ▼
-                    Dashboard ──▶ "Protocolar todos"
+                 "Protocolar n" — from the scanner or the dashboard;
+                  either way the camera closes before anything is sent
+                               │
                                ▼
               one at a time:  PUT {PROTOCOL_URL}/<id>
                               PUT {PROTOCOL_AS_URL}/<id>   ← only if AS was
@@ -74,15 +96,44 @@ This is enforced in one place, [`runRecord` in src/lib/queue.ts](src/lib/queue.t
 and is covered by tests that assert the AS endpoint is never contacted when the
 ordinary one fails.
 
+### Nothing is ever filed twice
+
+A filed protocol cannot be withdrawn, so "already submitted" is tracked in a
+field of its own — `protocoled` on the record, and `asProtocoled` for AS — and
+that field, not the display state, decides whether a request goes out.
+
+The distinction matters because it was a real bug. `protocol.status` is display
+state: a record whose protocol had succeeded but whose AS was still pending went
+back into the queue, was marked `running` for the AS leg, and — because the
+protocol leg is correctly skipped — never settled again. The stored `success`
+was gone. Judged on the status alone, the next run filed that protocol **a
+second time**. Stopping a run mid-way left the same wreckage.
+
+So the rule is now:
+
+- `protocoled` is **sticky**. It goes from false to true when a submission
+  succeeds and is never cleared by a later run, an abort, or a reload.
+- The only thing that clears it is **correcting the number**, which discards the
+  ID and makes it a genuinely different submission.
+- Both [`pendingRecords` and `runRecord`](src/lib/queue.ts) consult it before
+  `protocol.status`, so an unsettled or overwritten step cannot cause a resend.
+- [Loading a history](src/lib/storage.ts) recovers the flag from the step status
+  for records written before it existed — without that migration, upgrading
+  would have re-filed every protocol in an existing history exactly once.
+
+Covered by the **never files the same protocol twice** tests in `queue.test.ts`,
+which drive the exact wreckage state, and by the migration tests in
+`storage.test.ts`.
+
 ---
 
 ## Using the app
 
 ### Dashboard
 
-The home screen. Shows counters (total, a enviar, enviados, falhas), the full
-scan history, and the two actions: **Escanear protocolos** and **Protocolar
-todos**.
+The home screen. Counters across the top (total, a enviar, protocolados,
+falhas), the scan history in the middle, and a **bottom dock** holding the two
+actions you actually press: **Escanear** and **Protocolar *n***.
 
 ### Scanning
 
@@ -120,6 +171,31 @@ Two things follow from the box being small, both good:
 - The confirm sheet's photo is the band itself — the digits are large and easy
   to check against what the app read.
 
+**The box is deliberately tight** — 65% less of the frame than it started out,
+after two rounds of tuning against real slips. Browsers give no dependable focus
+control, and none whatsoever on iOS, so the page ends up held further back than
+the guide strictly requires — and further back reads *better*, because the frame
+comes out sharper and sharpness is what the OCR is short of. At that distance
+the field takes up less of the frame, so a wide box stops being "the Protocolo
+line" and becomes "the Protocolo line plus whatever is printed around it" —
+noise that costs read time and hands the extractor more long numbers to mistake
+for the right one.
+
+This does not cost resolution the way it looks like it should. The crop is
+normalised to a fixed width before recognition, so a smaller box is **upscaled
+more**, not read from fewer effective pixels — which is why holding the page
+further back and reading less of it wins on both counts.
+
+Note what did *not* change: the **guide** is the same size. The guide is what
+decides how far away the phone is held, and shrinking *that* is what caused the
+old focus-blur failure. Narrowing only the crop keeps the distance and drops the
+noise. See [How accurate is the OCR?](#how-accurate-is-the-ocr).
+
+> Because nothing in the UI resizes the box, its **size always comes from the
+> current default and only its position is remembered**. A box you lined up
+> earlier is re-centred at the new size, so tuning the default reaches everyone
+> without anyone having to re-aim or clear their storage.
+
 This is **not** the thin-strip framing that was tried and abandoned; that one
 failed because filling it forced the phone inside its minimum focus distance.
 Here the phone stays back with the whole slip in the guide, and the crop is
@@ -151,6 +227,20 @@ alongside AS — untick it for the ones that are not. Either way the choice stic
 for the next slip, so a run of pages that all go the same way needs no tapping
 at all.
 
+**Confirming keeps the camera up for the next slip** — the whole point is
+working through a pile without closing and re-warming the camera each page. A
+badge counts what you have confirmed this session.
+
+When the stack is done, the scanner's own **Protocolar *n*** button finishes the
+job: it **closes the camera first**, then starts the run, so you land on the
+dashboard and watch the progress bar. A run must never happen with the camera
+up — the submissions would go out behind an opaque overlay, with no progress and
+no **Parar**. **Concluir** just closes the camera without sending anything.
+
+The dashboard behind the scanner is `inert` while the camera is open, so its
+controls cannot be reached by a stray tap, by the keyboard, or by assistive
+tech.
+
 Tap the number itself to correct it before saving.
 
 ### History
@@ -159,12 +249,36 @@ Every scan is stored on the device. For each row you can:
 
 | Action | How |
 | --- | --- |
+| **Leave one out of the run** | the big checkbox on the left of the row |
+| **Leave out / include everything** | the checkbox above the list |
+| **Toggle AS** | *Protocolar também AS* on the row |
 | **Correct the number** | pencil icon, or tap the number on the confirm sheet |
-| **Toggle AS** | the checkbox on the row |
 | **Retry a failed ID lookup** | the refresh icon (only shown when it failed) |
 | **Delete one** | the trash icon on the row |
 | **Search** | the search field, matches on digits |
 | **Clear everything** | the trash button next to the search field, with a confirmation |
+
+**Unticking a row leaves it in the history but sends nothing for it** — no
+protocol, no AS. That is different from unticking *Protocolar também AS*, which
+only drops the AS half. The button at the bottom counts what is actually going
+out, so it reads *Protocolar 7* rather than *Protocolar todos*. Already-filed
+rows cannot be unticked, because there is nothing left to leave out.
+
+Each row states where it stands, in plain terms:
+
+| Badge | Meaning |
+| --- | --- |
+| **Protocolado** | filed successfully — it will never be sent again |
+| **Protocolando…** | in flight right now |
+| **Falha ao protocolar** | the submission failed; the reason is printed underneath |
+| **AS protocolada** | the AS submission landed |
+| **AS não enviada** | AS was wanted but the ordinary protocol failed first |
+| **sem ID** | the lookup never resolved, so nothing can be submitted |
+| **fora do envio** | you unticked it |
+
+**Protocolado** follows the sticky `protocoled` flag rather than the transient
+step state, so a row that was filed keeps saying so even while the run is busy
+with its AS.
 
 Correcting a number **discards its ID and looks it up again**, because the ID
 belongs to the old number. Any previous submission result is cleared too, so a
@@ -172,9 +286,17 @@ corrected row never carries a result that belonged to different digits.
 
 ### Submitting
 
-**Protocolar todos** walks the history one request at a time. Already-successful
-records are skipped, so pressing it again only retries what is outstanding. The
-progress bar shows position and the number in flight; **Parar** aborts.
+**Protocolar *n*** walks the ticked records one request at a time — the count is
+what will actually be sent. Already-filed and unticked records are skipped, so
+pressing it again only retries what is outstanding, including after a reload or
+after you stopped a run halfway. See [Nothing is ever filed
+twice](#nothing-is-ever-filed-twice). The progress bar shows position and the
+number in flight; **Parar** aborts.
+
+The scan and submit buttons sit in a **dock at the bottom of the screen**, and
+the row checkboxes are sized for a thumb: the app is used standing up, one
+handed, with a stack of paper in the other hand, and the top of a phone screen
+is the hardest place to reach.
 
 The **Relatório** screen groups outcomes into Falha and Sucesso, each row
 carrying número, ID and motivo, and offers **Copiar** / **CSV** plus **Tentar
@@ -239,16 +361,89 @@ pattern. Two independent reasons, on purpose. This is pinned by
 [src/test/sw.test.ts](src/test/sw.test.ts) — if you widen the cache rules, those
 tests are what should stop you.
 
-### Testing the PWA
+### Installing on a phone
 
-**A service worker cannot register on the LAN dev server.** Browsers refuse to
-register one on an origin with a certificate error, and the self-signed
-certificate covers only localhost — the same constraint that keeps the mock API
-in the dev server rather than in a worker. Registration is therefore limited to
-production builds ( `import.meta.env.PROD` ), so nothing is even attempted in
-dev.
+If the phone only offers **"Add to Home screen"** and never **"Install app"**,
+or iOS refuses to open the page at all, it is the certificate. Two separate
+things have to be true, and the default dev setup satisfies neither:
 
-To exercise it locally:
+1. **The origin must have no certificate error.** `@vitejs/plugin-basic-ssl`
+   issues a certificate for `localhost` and `127.0.0.1` only. Your phone
+   connects to the LAN address — say `https://192.168.1.57:5173` — which is not
+   in that certificate, so every browser flags the origin. Browsers refuse to
+   register a service worker on a flagged origin *even after you tap through the
+   warning*, and with no worker Chrome offers a bookmark instead of an install.
+   iOS enforces this harder still and may not offer to proceed at all.
+2. **It must be a production build.** Registration is behind
+   `import.meta.env.PROD` ([src/main.tsx](src/main.tsx)), so `pnpm dev` never
+   registers a worker no matter how good the certificate is.
+
+#### How the local certificate works
+
+`pnpm cert` issues **two** things, and the split is the whole trick:
+
+```text
+  certs/dev-ca.crt          a tiny certificate authority.
+        │                   Installed on the phone once. Long-lived,
+        │  signs            never changes, so the phone keeps trusting it.
+        ▼
+  certs/dev-server.crt      the server certificate, listing localhost,
+                            the loopback addresses, and this machine's
+                            LAN address. Reissued whenever you like.
+```
+
+The phone is told to trust the **CA**; the CA vouches for the **server
+certificate**; the server certificate actually names the address the phone is
+connecting to. All three have to line up, and with `basicSsl()` the third one
+never did — its certificate says `localhost` while the phone is dialling
+`192.168.x.x`.
+
+Once they line up the origin is clean: no warning, and — the part that matters —
+the browser will finally register a **service worker**, which is what turns the
+page from a bookmark into an installable app.
+
+Two consequences worth remembering:
+
+- **Re-running `pnpm cert` is cheap.** The CA is reused, so phones that already
+  trust it need no attention; only the server certificate is reissued. Do it
+  whenever your DHCP lease hands you a new address.
+- **`certs/` is git-ignored, and must stay that way.** Anyone holding
+  `dev-ca.key` can mint certificates that every phone you set up will trust
+  silently.
+
+#### Setting it up
+
+Fix the first with `pnpm cert`, which issues a certificate that actually covers
+this machine's LAN address, signed by a local CA you install on the phone once:
+
+```bash
+pnpm cert                # writes certs/ — CA + server certificate
+pnpm build && pnpm preview
+```
+
+Then, **on the phone**, open `https://<lan-ip>:4173/dev-ca.crt` and install it:
+
+- **Android** — Settings → Security → Encryption & credentials → Install a
+  certificate → **CA certificate**. (Some builds put it under Settings →
+  Security → More settings.)
+- **iOS** — open the link in Safari, allow the profile download, then Settings →
+  General → **VPN & Device Management** → install it. Then the step everyone
+  misses: Settings → General → About → **Certificate Trust Settings** → switch
+  it on. iOS ignores a user-installed root until you do.
+
+Reload the app and it should offer **Install app**.
+
+Two details that exist to satisfy Apple: the server certificate is issued for
+**397 days** (iOS rejects anything over 398) and carries
+`extendedKeyUsage=serverAuth`, which iOS 13+ requires of every TLS server
+certificate.
+
+While no certificate has been generated, the dev server falls back to
+`basicSsl()` exactly as before, which remains fine for desktop work.
+
+### Testing the PWA on a desktop
+
+To exercise the worker without any certificate at all:
 
 ```bash
 pnpm build
@@ -274,10 +469,11 @@ Then, in Chrome DevTools:
 6. Scan something while offline to confirm the Tesseract files came from
    `vendor-v1` rather than the network.
 
-To verify a real install on the phone, the app has to be on an origin with a
-**trusted** certificate — a proper deployment, or a tunnel such as `ngrok` or
-Cloudflare Tunnel pointed at the dev server. The self-signed LAN address can
-never install.
+For a real install on a phone, see [Installing on a
+phone](#installing-on-a-phone) above. A public tunnel (`ngrok`, Cloudflare
+Tunnel) also gives a trusted certificate with no device setup — but note the
+build **inlines `VITE_AUTH_TOKEN` into the bundle**, so a public URL hands that
+token to anyone who finds it. The local CA keeps everything on the LAN.
 
 ### Shipping an update
 
@@ -355,6 +551,45 @@ handler answers any method — so nothing else needs touching.
 rather than firing real submissions at a live government service because
 someone forgot to create one.
 
+### Mocking cannot be half-on
+
+There used to be a way to have `VITE_USE_MOCK=true` and still file real
+protocols, and it was completely silent. It is worth understanding, because the
+configuration that causes it is the obvious one.
+
+The mock is served by the **dev server**, so it can only intercept requests that
+reach the dev server. Leave the three URLs pointing at the real service —
+
+```dotenv
+VITE_USE_MOCK=true
+VITE_PROTOCOL_URL=https://real-service.example/protocolo/protocolar
+```
+
+— and the browser sends that request straight past the dev server to the real
+host. Mocking looks on. Every submission is real, and a filed protocol has no
+undo.
+
+Two independent defences now prevent it:
+
+1. **Absolute endpoints are rewritten to their path while mocking**
+   ([src/lib/config.ts](src/lib/config.ts)), so every call lands on this origin
+   where the dev server answers it. The middleware normalises the same way
+   ([plugins/mock-api.ts](plugins/mock-api.ts)), so the two always agree. You can
+   flip `VITE_USE_MOCK` on and off without touching the URLs.
+2. **Anything that would still leave this origin is refused**
+   ([src/lib/api.ts](src/lib/api.ts)) — before `fetch`, so nothing goes out. It
+   surfaces as an ordinary failure reading *"Bloqueado: VITE_USE_MOCK está
+   ligado…"*. This catches what the rewrite cannot, such as a protocol-relative
+   `//host/path`.
+
+Both are covered by the **mock safety** tests in `api.test.ts`, including the
+assertion that `fetch` is never called, and the counterpart test that turning
+mocking *off* still reaches the real service.
+
+> If you see *Bloqueado* in the report, mocking is on and an endpoint points
+> somewhere other than this origin. Either use a relative URL or set
+> `VITE_USE_MOCK=false` — deliberately.
+
 ### The mock backend
 
 The mock is served by the **dev server itself**
@@ -386,6 +621,33 @@ you can reproduce any path on demand:
 | `98` | ordinary protocol fails — AS must then be skipped |
 | `99` | ordinary protocol succeeds, AS fails (422) |
 | anything else | everything succeeds |
+
+### The seeded history
+
+With mocking on, a first visit starts with a **sample history already in the
+list**, so you can press **Protocolar todos** immediately — no camera, no paper,
+no scanning. The rows are chosen to hit each rule above exactly once rather than
+five identical successes:
+
+| Row ends in | What it demonstrates |
+| --- | --- |
+| `19` | the ordinary path — protocol and AS both succeed |
+| `99` | protocol succeeds, AS fails — one row of each in the report |
+| `98` | protocol fails, so AS is reported **não enviado** and never sent |
+| `97` | no ID, so neither call may go out, and both are reported |
+| `01` | **already filed** — must be skipped, never submitted again |
+
+That last row is the one worth watching. It carries `protocoled: true` with an
+unsettled step state, which is exactly the shape that used to cause a second
+submission of an already-filed protocol (see [Nothing is ever filed
+twice](#nothing-is-ever-filed-twice)). Pressing Protocolar todos must leave it
+alone.
+
+Seeded **once per browser** and remembered, so *Limpar tudo* stays cleared
+rather than growing the samples back on the next reload. It is
+[src/mocks/seed.ts](src/mocks/seed.ts), reached only when `USE_MOCK` is on —
+with mocking off the whole thing is dead-code eliminated and cannot appear in a
+production build.
 
 ---
 
@@ -423,7 +685,7 @@ pnpm install
 pnpm test
 ```
 
-Expect **171 passed**. That is the whole check — if it is green, the logic is
+Expect **236 passed**. That is the whole check — if it is green, the logic is
 behaving. Other ways to run it:
 
 ```bash
@@ -578,14 +840,19 @@ conventions matter, and both exist because of bugs this project actually hit:
 
 ## Test coverage
 
-Vitest + Testing Library + MSW, 171 tests. Notable coverage:
+Vitest + Testing Library + MSW, 236 tests. Notable coverage:
 
 - **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
   from the reference photo, including the mangled `Nº`; label anchoring
   preferring the labelled number over other long numbers on the page.
 - **`queue.test.ts`** — the AS rule: AS never precedes the ordinary protocol,
   never fires when it fails, never fires without an ID; strict one-at-a-time
-  sequencing verified by counting concurrent in-flight requests.
+  sequencing verified by counting concurrent in-flight requests. Plus **never
+  files the same protocol twice**, driving the exact states an interrupted or
+  AS-only run leaves behind.
+- **`seed.test.ts`** — the mocked starting history covers each deterministic
+  outcome once, survives a deliberate clear, and keeps its already-filed row out
+  of the queue.
 - **`preprocess.test.ts`** — the `object-fit: cover` coordinate mapping, for
   both the scan box and the tap-to-focus point, including that the two agree at
   the same on-screen spot; and a guard that the scan region stays large (a
@@ -597,6 +864,10 @@ Vitest + Testing Library + MSW, 171 tests. Notable coverage:
 - **`sw.test.ts`** — the service worker's caching allowlist, run against
   stand-in globals: that no submission and no lookup is ever cached, and that
   the build output and the Tesseract runtime are.
+- **`api.test.ts`, older Safari** — the suite deletes `AbortSignal.any` and
+  `AbortSignal.timeout` to emulate an iPhone below iOS 17.4, and asserts that
+  cancels and timeouts still arrive distinguishable from each other. Without the
+  fallbacks every request threw before leaving the app.
 - **`storage.test.ts`** — migration of records written by older versions; the
   aim box surviving a corrupt or out-of-bounds saved value.
 - **`ScannerView.test.tsx`** — the aim box goes where it is dragged, stays
@@ -694,12 +965,15 @@ src/
     sw.test.ts       the service worker's caching rules
 plugins/
   mock-api.ts        serves the mock API from the dev server
+  dev-cert.ts        loads the dev certificate, serves the CA at /dev-ca.crt
 public/
   sw.js              service worker — offline shell, never caches the API
   manifest.webmanifest
   icon-*.png         PWA icons (generated from favicon.svg)
 scripts/
   only-pnpm.mjs      preinstall guard: blocks npm and yarn
+  dev-cert.mjs       issues the local CA + LAN server certificate
+certs/               generated by `pnpm cert`, git-ignored — never commit
 ```
 
 Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui (Radix),
@@ -712,6 +986,7 @@ Tesseract.js, MSW, Vitest.
 | | |
 | --- | --- |
 | `pnpm dev` | LAN dev server over HTTPS |
+| `pnpm cert` | issue a dev certificate covering this machine's LAN address, so a phone can install the PWA |
 | `pnpm build` | typecheck + production build |
 | `pnpm preview` | serve the build over HTTPS, for LAN/phone testing |
 | `pnpm preview:pwa` | serve the build over HTTP on localhost, where the service worker can register |
@@ -762,6 +1037,17 @@ is not `false`, that the three URLs match what `plugins/mock-api.ts` was given,
 and restart the dev server — `vite.config.ts` reads the env at startup, so
 changes there need a restart, not just a reload.
 
+**Everything fails with "Bloqueado: VITE_USE_MOCK está ligado…".** Working as
+intended, and it just stopped a real submission. Mocking is on while an endpoint
+points at another origin. Point the three URLs at relative paths, or set
+`VITE_USE_MOCK=false` if you actually meant to submit for real. See [Mocking
+cannot be half-on](#mocking-cannot-be-half-on).
+
+**Mocking is on but real protocols were filed.** Fixed — that combination is now
+refused rather than sent. If you are on an older build, the cause is absolute
+URLs in `.env`: they bypass the dev server entirely, so the mock never sees the
+request. Restart the dev server after updating.
+
 **Against a real host, everything fails with "sem ID".** The lookup endpoint is
 unreachable. Check `VITE_LOOKUP_URL` and that the proxy in `vite.config.ts` is
 uncommented and pointed at the right target.
@@ -780,11 +1066,24 @@ directly instead of stubbing it.
 **`npm install` refuses to run.** Intended — use `pnpm install`. Only
 `pnpm-lock.yaml` is committed; see [Scripts](#scripts).
 
-**No install prompt / the service worker never registers.** Almost always the
-certificate. A worker cannot register on an origin with a certificate error, so
-the self-signed LAN address will never work — use `pnpm preview:pwa` on
-localhost, or deploy behind a trusted certificate. Registration is also
-production-only, so `pnpm dev` never registers one by design.
+**The phone adds a shortcut instead of installing the app.** The two causes are
+the certificate and the build; see [Installing on a
+phone](#installing-on-a-phone). Short version: run `pnpm cert`, install
+`https://<lan-ip>:4173/dev-ca.crt` on the phone (on iOS also enable it under
+Certificate Trust Settings), and serve a **production** build — `pnpm dev` never
+registers a worker by design.
+
+**iOS will not open the page at all.** Same certificate problem, enforced more
+strictly than on Android. Follow [Installing on a
+phone](#installing-on-a-phone). If it loads but nothing submits, that is a
+different issue: `AbortSignal.any` needs Safari 17.4+, and `AbortSignal.timeout`
+Safari 16+ — [src/lib/api.ts](src/lib/api.ts) falls back to hand-wired listeners
+when either is missing, so check you are running a current build.
+
+**I installed the CA on iOS and it still complains.** You almost certainly
+skipped the second step. Installing a root under *VPN & Device Management* is
+not enough — it stays untrusted until you switch it on under Settings → General
+→ About → **Certificate Trust Settings**.
 
 **An old version keeps loading after a deploy.** The worker activates on the
 next full load; close the installed app and reopen it. If it persists, DevTools

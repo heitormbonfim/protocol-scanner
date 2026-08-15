@@ -15,6 +15,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "preview:pwa": "HTTPS=false vite preview --host localhost",
+    "cert": "node scripts/dev-cert.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"

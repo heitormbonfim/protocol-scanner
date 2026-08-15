@@ -31,6 +31,8 @@ function normalize(value: unknown): ProtocolRecord | null {
   if (!record.lookup || typeof record.lookup !== 'object') return null
   if (!record.protocol || typeof record.protocol !== 'object') return null
 
+  const as = record.as && typeof record.as === 'object' ? record.as : { status: 'idle' as const }
+
   return {
     num: record.num,
     id: record.id,
@@ -38,9 +40,17 @@ function normalize(value: unknown): ProtocolRecord | null {
     editedAt: typeof record.editedAt === 'number' ? record.editedAt : undefined,
     source: record.source ?? 'manual',
     withAs: record.withAs === true,
+    // Included unless explicitly unticked, so a history written before the
+    // checkbox existed does not come back with everything left out of the run.
+    selected: record.selected !== false,
     lookup: record.lookup,
     protocol: record.protocol,
-    as: record.as && typeof record.as === 'object' ? record.as : { status: 'idle' },
+    as,
+    // Records written before these flags existed carry the fact in their step
+    // status instead, so it is recovered here. Getting this wrong would mean
+    // re-filing every protocol in an existing history exactly once.
+    protocoled: record.protocoled === true || record.protocol.status === 'success',
+    asProtocoled: record.asProtocoled === true || as.status === 'success',
   }
 }
 
@@ -100,7 +110,38 @@ export function loadFieldRoi(): Roi {
     // A zero-area box would read nothing and look like a broken scanner.
     if (roi.w <= 0 || roi.h <= 0) return DEFAULT_FIELD_ROI
 
-    return clampRoiInside({ x: roi.x, y: roi.y, w: roi.w, h: roi.h })
+    /*
+     * The **position** is remembered; the **size** always comes from the
+     * current default.
+     *
+     * Nothing in the UI resizes the box, so a stored size is only ever whatever
+     * the default happened to be the day it was saved. Honouring it would mean
+     * that tuning the default — making the crop tighter to cut noise, say —
+     * silently never reached anyone who had already lined the box up once,
+     * which is everyone who actually uses the app.
+     *
+     * It shrinks about its own centre, so the field it was aimed at stays under
+     * it and nobody has to re-aim.
+     */
+    const sameSize =
+      Math.abs(roi.w - DEFAULT_FIELD_ROI.w) < 1e-9 &&
+      Math.abs(roi.h - DEFAULT_FIELD_ROI.h) < 1e-9
+
+    // Already the current size: keep the stored position exactly. Running it
+    // through the recentring below would only introduce floating-point drift.
+    if (sameSize) {
+      return clampRoiInside({ x: roi.x, y: roi.y, w: roi.w, h: roi.h })
+    }
+
+    const centreX = roi.x + roi.w / 2
+    const centreY = roi.y + roi.h / 2
+
+    return clampRoiInside({
+      x: centreX - DEFAULT_FIELD_ROI.w / 2,
+      y: centreY - DEFAULT_FIELD_ROI.h / 2,
+      w: DEFAULT_FIELD_ROI.w,
+      h: DEFAULT_FIELD_ROI.h,
+    })
   } catch {
     return DEFAULT_FIELD_ROI
   }

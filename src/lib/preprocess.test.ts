@@ -217,8 +217,22 @@ describe('DEFAULT_FIELD_ROI', () => {
     expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
   })
 
-  it('is a band, not a pinhole — a wrapped field still has to fit', () => {
-    expect(DEFAULT_FIELD_ROI.w).toBeGreaterThan(0.5)
-    expect(DEFAULT_FIELD_ROI.h).toBeGreaterThan(0.1)
+  it('is a band, not a pinhole — a whole number still has to fit', () => {
+    /*
+     * A floor, not a restatement of the current value. The box has been
+     * tightened twice as the working distance grew, and that is fine — but
+     * below roughly this size it stops covering a protocol line at all, and the
+     * scanner would simply never find anything with nothing on screen to say
+     * why.
+     */
+    expect(DEFAULT_FIELD_ROI.w).toBeGreaterThanOrEqual(0.35)
+    expect(DEFAULT_FIELD_ROI.h).toBeGreaterThanOrEqual(0.06)
+
+    // And it frames one line of text, so it stays much wider than it is tall.
+    expect(DEFAULT_FIELD_ROI.w / DEFAULT_FIELD_ROI.h).toBeGreaterThan(3)
+  })
+
+  it('still sits inside the guide at its new size', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
   })
 })

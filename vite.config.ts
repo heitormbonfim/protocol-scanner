@@ -5,6 +5,7 @@ import babel from '@rolldown/plugin-babel'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import tailwindcss from '@tailwindcss/vite'
 import { mockApi } from './plugins/mock-api.ts'
+import { devCa, localCert } from './plugins/dev-cert.ts'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -30,6 +31,18 @@ export default defineConfig(({ mode }) => {
    */
   const useHttps = process.env.HTTPS !== 'false'
 
+  /**
+   * A certificate from `pnpm cert`, if one has been generated.
+   *
+   * This is what makes the app installable on a phone. `basicSsl()` below
+   * covers only localhost, so a phone on the LAN address always sees a
+   * certificate error — and a browser refuses to register a service worker on
+   * such an origin, which is why the app could only ever add a home-screen
+   * shortcut instead of installing. `pnpm cert` issues one that covers the LAN
+   * address and is signed by a CA you install on the phone once.
+   */
+  const cert = useHttps ? localCert() : null
+
   return {
     plugins: [
       react(),
@@ -43,7 +56,13 @@ export default defineConfig(({ mode }) => {
       // the LAN IP always sees a certificate warning. That is expected and
       // harmless here — but it is also why mocking must not rely on a service
       // worker; see plugins/mock-api.ts.
-      ...(useHttps ? [basicSsl()] : []),
+      //
+      // Only when `pnpm cert` has not been run: a generated certificate is
+      // supplied through `server.https` below and is strictly better, since it
+      // is the one a phone can be made to trust.
+      ...(useHttps && !cert ? [basicSsl()] : []),
+      // Serves /dev-ca.crt so a phone can install the CA by visiting the URL.
+      devCa(),
       // Answers the three mock endpoints from the dev server itself.
       mockApi({
         enabled: useMock,
@@ -64,6 +83,7 @@ export default defineConfig(({ mode }) => {
       // Bind to 0.0.0.0 so the phone can reach the dev server over the LAN.
       host: true,
       port: 5173,
+      ...(cert ? { https: cert } : {}),
 
       // Once the real protocol API host is known, set VITE_USE_MOCK=false and
       // uncomment this so browser requests to /api are proxied server-side and
@@ -78,9 +98,12 @@ export default defineConfig(({ mode }) => {
       //   },
       // },
     },
+    // The PWA can only be exercised from a production build, so preview is
+    // where a phone install is actually tested — it needs the certificate too.
     preview: {
       host: true,
       port: 4173,
+      ...(cert ? { https: cert } : {}),
     },
   }
 })

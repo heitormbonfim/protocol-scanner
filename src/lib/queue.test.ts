@@ -140,6 +140,107 @@ describe('runProtocolQueue — the AS rule', () => {
   })
 })
 
+describe('never files the same protocol twice', () => {
+  /**
+   * The regression this exists for.
+   *
+   * A record whose protocol succeeded but whose AS is still pending goes back
+   * into the queue. The dashboard marks whatever is in flight as `running`, and
+   * because the protocol leg is skipped that step never settles again — the
+   * stored `success` is gone. Judged on `protocol.status` alone the next run
+   * files the protocol a second time, against a live service, with no undo.
+   *
+   * `protocoled` is sticky precisely so none of that matters.
+   */
+  it('does not re-send a protocol whose step state was left mid-run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({
+        withAs: true,
+        protocoled: true,
+        // Exactly the state the clobber leaves behind.
+        protocol: { status: 'running' },
+      }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+  })
+
+  it('does not re-send a protocol left idle by an interrupted run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({ withAs: true, protocoled: true, protocol: { status: 'idle' } }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+  })
+
+  it('never re-sends an AS that already went out', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({
+        withAs: true,
+        protocoled: true,
+        asProtocoled: true,
+        protocol: { status: 'running' },
+        as: { status: 'running' },
+      }),
+    ])
+
+    expect(calls).toEqual([])
+  })
+
+  it('keeps a fully-filed record out of the queue even with unsettled steps', () => {
+    const done = makeRecord({
+      withAs: true,
+      protocoled: true,
+      asProtocoled: true,
+      protocol: { status: 'running' },
+      as: { status: 'idle' },
+    })
+
+    expect(pendingRecords([done])).toHaveLength(0)
+  })
+
+  it('still sends a protocol that genuinely has not been filed', () => {
+    // The counterpart: the flag must not wedge the queue shut.
+    const fresh = makeRecord({ protocoled: false, protocol: { status: 'idle' } })
+    expect(pendingRecords([fresh])).toHaveLength(1)
+  })
+})
+
+describe('records left out of the run', () => {
+  it('sends nothing at all for an unticked record', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([makeRecord({ withAs: true, selected: false })])
+
+    expect(calls).toEqual([])
+  })
+
+  it('keeps an unticked record out of the queue', () => {
+    expect(pendingRecords([makeRecord({ selected: false })])).toHaveLength(0)
+  })
+
+  it('treats a record with no flag as included', () => {
+    // Absent means included: a history written before the checkbox existed must
+    // not come back with everything silently left out.
+    const record = makeRecord()
+    delete (record as Partial<ProtocolRecord>).selected
+    expect(pendingRecords([record])).toHaveLength(1)
+  })
+
+  it('sends the ticked ones and skips the rest in the same run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({ num: '202601300217701', id: 'PRT-217701', selected: false }),
+      makeRecord({ num: '202601300217702', id: 'PRT-217702', selected: true }),
+      makeRecord({ num: '202601300217703', id: 'PRT-217703', selected: false }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217702`)])
+  })
+})
+
 describe('runProtocolQueue — sequencing', () => {
   it('sends one request at a time, never in parallel', async () => {
     let inFlight = 0

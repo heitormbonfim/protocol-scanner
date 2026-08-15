@@ -57,10 +57,29 @@ export const SCAN_ROI: Roi = { x: 0.04, y: 0.06, w: 0.92, h: 0.86 }
  *
  * A starting position, not a fixed one: forms put the field in different
  * places, so the user drags the box onto it once and the position is
- * remembered (see `loadFieldRoi`). A band rather than a tight box, so a field
- * that wraps onto a second line still lands inside it.
+ * remembered (see `loadFieldRoi`). Still a band rather than a pinhole, so a
+ * field that wraps onto a second line lands inside it.
+ *
+ * Deliberately tight, and tightened twice on measured behaviour. Browsers give
+ * no reliable focus control — none at all on iOS — so the slip ends up held
+ * further back than the guide strictly requires, and further back turns out to
+ * read *better*: the frame is sharper, and sharpness is what the OCR is short
+ * of. At that distance the field occupies less of the frame, so a wide box
+ * stops being "the Protocolo line" and becomes "the Protocolo line plus
+ * whatever is printed around it" — noise that costs read time and hands the
+ * extractor more long numbers to mistake for the right one.
+ *
+ * Note this does *not* cost resolution the way it looks like it should: the
+ * crop is normalised to `OCR_WIDTH` before recognition, so a smaller box is
+ * upscaled more rather than read from fewer effective pixels. Sharpness wins,
+ * which is exactly what holding the page further back buys.
+ *
+ * `SCAN_ROI` above is untouched on purpose, and must stay that way. The guide
+ * decides how far away the phone is held, and shrinking *that* is what caused
+ * the old focus-blur failure — it forced the phone inside its minimum focus
+ * distance. Narrowing only the crop keeps the distance and discards the noise.
  */
-export const DEFAULT_FIELD_ROI: Roi = { x: 0.08, y: 0.28, w: 0.84, h: 0.16 }
+export const DEFAULT_FIELD_ROI: Roi = { x: 0.24, y: 0.32, w: 0.52, h: 0.09 }
 
 /**
  * Keep a region inside the guide.

@@ -38,12 +38,38 @@ export type RunOptions = {
   onOutcome?: (outcome: ProtocolOutcome) => void
 }
 
-/** Records that still have work left — fully-settled ones are skipped. */
+/**
+ * Has the ordinary protocol been filed?
+ *
+ * `protocoled` first: it is sticky, while `protocol.status` is display state
+ * that a later run can overwrite. Falling back to the status keeps records
+ * written before the flag existed working.
+ */
+export function isProtocoled(record: ProtocolRecord): boolean {
+  return record.protocoled === true || record.protocol.status === 'success'
+}
+
+/** The same, for AS. */
+export function isAsProtocoled(record: ProtocolRecord): boolean {
+  return record.asProtocoled === true || record.as.status === 'success'
+}
+
+/** Whether the user has left this record in the next run. */
+export function isSelected(record: ProtocolRecord): boolean {
+  return record.selected !== false
+}
+
+/**
+ * Records that still have work left.
+ *
+ * Fully-settled records are skipped, and so are ones the user unticked — an
+ * unticked record is left alone entirely, not merely reported as pending.
+ */
 export function pendingRecords(records: ProtocolRecord[]): ProtocolRecord[] {
   return records.filter((record) => {
-    const protocolDone = record.protocol.status === 'success'
-    const asDone = !record.withAs || record.as.status === 'success'
-    return !protocolDone || !asDone
+    if (!isSelected(record)) return false
+    const asDone = !record.withAs || isAsProtocoled(record)
+    return !isProtocoled(record) || !asDone
   })
 }
 
@@ -95,7 +121,9 @@ async function runRecord(
   }
 
   // ── Step 1: the ordinary protocol ───────────────────────────────────────
-  let protocolOk = record.protocol.status === 'success'
+  // A protocol already filed is never filed again, whatever the step state
+  // says. There is no undo on the far end.
+  let protocolOk = isProtocoled(record)
 
   if (!protocolOk) {
     const result = await protocolById(id, signal)
@@ -111,6 +139,9 @@ async function runRecord(
   }
 
   if (!record.withAs) return
+
+  // Already filed, for the same reason as above.
+  if (isAsProtocoled(record)) return
 
   // ── Step 2: AS, and only on the back of a successful step 1 ─────────────
   if (!protocolOk) {

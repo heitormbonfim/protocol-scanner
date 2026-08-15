@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createRef } from 'react'
 import { ScannerView } from './ScannerView'
@@ -68,6 +69,8 @@ function setup(props: Partial<React.ComponentProps<typeof ScannerView>> = {}) {
       source={null}
       paused={false}
       scannedThisSession={0}
+      pendingCount={0}
+      onProtocol={vi.fn()}
       onClose={vi.fn()}
       {...props}
     />,
@@ -82,6 +85,61 @@ function drag(box: HTMLElement, dx: number, dy: number) {
   fireEvent.pointerMove(box, { pointerId: 1, clientX: 100 + dx, clientY: 400 + dy })
   fireEvent.pointerUp(box, { pointerId: 1, clientX: 100 + dx, clientY: 400 + dy })
 }
+
+describe('the overlay itself', () => {
+  it('stacks above the dashboard chrome', () => {
+    // Regression. The dashboard's header and bottom dock are `sticky z-20`, and
+    // a positioned element with a z-index paints above a `fixed` one with
+    // `z-index: auto` — so with no z-index here the Escanear and Protocolar
+    // buttons showed through the camera and could be pressed mid-scan.
+    setup()
+    const overlay = document.querySelector('.fixed.inset-0')
+
+    expect(overlay).not.toBeNull()
+    expect(overlay).toHaveClass('z-40')
+  })
+
+  it('counts the slips confirmed since the camera opened', () => {
+    setup({ scannedThisSession: 7 })
+    expect(screen.getByText(/7 nesta sessão/)).toBeInTheDocument()
+  })
+})
+
+describe('finishing a stack from the scanner', () => {
+  it('offers no submit button when there is nothing to send', () => {
+    setup({ pendingCount: 0 })
+    expect(
+      screen.queryByRole('button', { name: /protocolar/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('offers one, counting what would go out', () => {
+    setup({ pendingCount: 4 })
+    expect(
+      screen.getByRole('button', { name: /protocolar 4/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('hands the run to the app, which closes the camera first', async () => {
+    // The camera must not stay up during a run: submissions would go out behind
+    // an opaque overlay with no progress and no way to stop them.
+    const user = userEvent.setup()
+    const onProtocol = vi.fn()
+    setup({ pendingCount: 2, onProtocol })
+
+    await user.click(screen.getByRole('button', { name: /protocolar 2/i }))
+    expect(onProtocol).toHaveBeenCalledOnce()
+  })
+
+  it('still offers Concluir on its own', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    setup({ pendingCount: 3, onClose })
+
+    await user.click(screen.getByRole('button', { name: /concluir/i }))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+})
 
 describe('the aim box', () => {
   it('is drawn where the ROI says it is', () => {

@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Camera, Check, Flashlight, Move, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Camera,
+  Check,
+  Flashlight,
+  Move,
+  Send,
+  X,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SCAN_ROI, clampRoiInside, pointToSourceFraction } from '@/lib/preprocess'
@@ -29,7 +37,17 @@ type ScannerViewProps = {
   required: number
   source: MatchSource | null
   paused: boolean
+  /** Slips confirmed since the camera was opened — the stack you just worked. */
   scannedThisSession: number
+  /** How many records a run would actually send, for the submit button. */
+  pendingCount: number
+  /**
+   * Finish scanning and start the run.
+   *
+   * Closes the camera on the way, so submissions never go out behind an opaque
+   * overlay where their progress cannot be seen or stopped.
+   */
+  onProtocol: () => void
   onClose: () => void
 }
 
@@ -68,6 +86,8 @@ export function ScannerView({
   source,
   paused,
   scannedThisSession,
+  pendingCount,
+  onProtocol,
   onClose,
 }: ScannerViewProps) {
   const active = cameraStatus === 'active'
@@ -191,7 +211,16 @@ export function ScannerView({
   }
 
   return (
-    <div className="fixed inset-0 bg-black">
+    /*
+     * `z-40` is load-bearing, not decoration.
+     *
+     * The dashboard's header and bottom dock are `sticky z-20`. A positioned
+     * element with a z-index paints above a `fixed` one with `z-index: auto`,
+     * so without this the Escanear and Protocolar buttons sat on top of the
+     * camera — visible and clickable while scanning. Kept below the dialog
+     * layer (z-50) so the confirm sheet still comes out in front.
+     */
+    <div className="fixed inset-0 z-40 bg-black">
       {/* Always mounted so the ref is stable when `start` attaches the stream. */}
       <video
         ref={videoRef}
@@ -376,24 +405,45 @@ export function ScannerView({
             </p>
           )}
 
-          <div className="pb-safe absolute inset-x-0 bottom-0 flex items-center gap-3 bg-linear-to-t from-black/85 to-transparent p-4">
-            <Badge variant="secondary" className="gap-1.5 py-1.5 text-sm">
-              <Check className="size-3.5" />
-              {scannedThisSession} nesta sessão
-            </Badge>
-            <div className="flex-1" />
-            {torchSupported && (
+          {/*
+            Controls sit at the bottom, within thumb reach — the phone is held
+            one handed with paper in the other. Two ways out: `Concluir` just
+            closes the camera, `Protocolar` closes it *and* starts the run, so
+            finishing a stack does not mean hunting for a second button on
+            another screen.
+          */}
+          <div className="pb-safe absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-transparent p-4">
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="gap-1.5 py-1.5 text-sm">
+                <Check className="size-3.5" />
+                {scannedThisSession} nesta sessão
+              </Badge>
+              <div className="flex-1" />
+              {torchSupported && (
+                <Button
+                  size="icon"
+                  variant={torchOn ? 'default' : 'secondary'}
+                  onClick={onToggleTorch}
+                  aria-pressed={torchOn}
+                  aria-label="Lanterna"
+                >
+                  <Flashlight />
+                </Button>
+              )}
+              <Button variant="secondary" onClick={onClose}>
+                Concluir
+              </Button>
+            </div>
+
+            {pendingCount > 0 && (
               <Button
-                size="icon"
-                variant={torchOn ? 'default' : 'secondary'}
-                onClick={onToggleTorch}
-                aria-pressed={torchOn}
-                aria-label="Lanterna"
+                size="lg"
+                className="mt-3 w-full"
+                onClick={onProtocol}
               >
-                <Flashlight />
+                <Send /> Protocolar {pendingCount}
               </Button>
             )}
-            <Button onClick={onClose}>Concluir</Button>
           </div>
         </>
       )}
