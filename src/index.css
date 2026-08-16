@@ -41,7 +41,12 @@
   --primary: oklch(0.54 0.12 160);
   --primary-foreground: oklch(0.99 0.005 235);
 
-  --secondary: oklch(0.965 0.008 235);
+  /*
+   * Kept a clear step below `--background`, not the usual hair's breadth: it
+   * has no border anywhere it is used — the progress track, the stat panel,
+   * the badges — so this contrast is the only thing that gives it an edge.
+   */
+  --secondary: oklch(0.925 0.014 235);
   --secondary-foreground: oklch(0.28 0.025 250);
 
   --muted: oklch(0.965 0.008 235);

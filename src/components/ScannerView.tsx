@@ -395,7 +395,6 @@ export function ScannerView({
 
             <Button
               size="icon"
-              variant="secondary"
               onClick={onClose}
               aria-label="Fechar câmera"
             >
@@ -416,7 +415,7 @@ export function ScannerView({
             finishing a stack does not mean hunting for a second button on
             another screen.
           */}
-          <div className="pb-safe absolute inset-x-0 bottom-0 bg-linear-to-t from-background via-background/85 to-transparent p-4">
+          <div className="pb-safe absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-transparent p-4">
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="gap-1.5 py-1.5 text-sm">
                 <Check className="size-3.5" />
@@ -434,9 +433,7 @@ export function ScannerView({
                   <Flashlight />
                 </Button>
               )}
-              <Button variant="secondary" onClick={onClose}>
-                Concluir
-              </Button>
+              <Button onClick={onClose}>Concluir</Button>
             </div>
 
             {pendingCount > 0 && (
