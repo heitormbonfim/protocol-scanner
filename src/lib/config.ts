@@ -15,20 +15,55 @@
  */
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 
-/** `GET {LOOKUP_URL}?numprotocol=<num>` → resolves a number to its id. */
-export const LOOKUP_URL = import.meta.env.VITE_LOOKUP_URL ?? "/api/protocols";
+/**
+ * An endpoint as the app should actually call it.
+ *
+ * While mocking, an **absolute** URL is reduced to its path so it resolves
+ * against the app's own origin, where the dev server answers it.
+ *
+ * This exists because of a genuinely dangerous trap. The mock is served by the
+ * dev server, not by anything inside the page, so it can only ever intercept
+ * requests that reach the dev server. Point the app at
+ * `https://real-service.example/protocolo` and turn mocking on, and the browser
+ * sends that request straight past the dev server to the real host — mocking
+ * silently does nothing and every submission is real. Switching
+ * `VITE_USE_MOCK` back to `true` without also swapping the three URLs looks
+ * exactly like it worked.
+ *
+ * Reducing to the path removes the trap: with mocking on, every call lands on
+ * this origin. `request` in `api.ts` then refuses anything that still would
+ * not, so a URL this cannot rewrite cannot escape either.
+ */
+function endpoint(configured: string): string {
+  if (!USE_MOCK) return configured;
+  try {
+    // Throws for a relative path, which is already what we want.
+    const absolute = new URL(configured);
+    return `${absolute.pathname}${absolute.search}`;
+  } catch {
+    return configured;
+  }
+}
 
-/** `GET {PROTOCOL_URL}/<id>` → the ordinary protocol submission. */
-export const PROTOCOL_URL = import.meta.env.VITE_PROTOCOL_URL ?? "/api/protocols";
+/** `GET {LOOKUP_URL}?protocoloId=<num>` → resolves a number to its id. */
+export const LOOKUP_URL = endpoint(
+  import.meta.env.VITE_LOOKUP_URL ?? "/api/protocols",
+);
+
+/** `PUT {PROTOCOL_URL}/<id>` → the ordinary protocol submission. */
+export const PROTOCOL_URL = endpoint(
+  import.meta.env.VITE_PROTOCOL_URL ?? "/api/protocols",
+);
 
 /**
- * `GET {PROTOCOL_AS_URL}/<id>` → the AS submission.
+ * `PUT {PROTOCOL_AS_URL}/<id>` → the AS submission.
  *
  * A separate service from the ordinary one, and never valid on its own: see
  * `runProtocolQueue` for the ordering rule that enforces it.
  */
-export const PROTOCOL_AS_URL =
-  import.meta.env.VITE_PROTOCOL_AS_URL ?? "/api/protocols-as";
+export const PROTOCOL_AS_URL = endpoint(
+  import.meta.env.VITE_PROTOCOL_AS_URL ?? "/api/protocols-as",
+);
 
 export const REQUEST_TIMEOUT_MS = Number(
   import.meta.env.VITE_REQUEST_TIMEOUT_MS ?? 5_000,

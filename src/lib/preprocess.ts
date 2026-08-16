@@ -10,8 +10,8 @@
  * image.
  *
  * So the guide is now a large document frame — hold the phone at a comfortable
- * distance with the whole slip in view — and the number is located in software
- * by anchoring on the "Protocolo" label (see `extractProtocol`).
+ * distance with the whole slip in view — and the field is picked out *within*
+ * that frame, by the aim box below, rather than by moving the phone closer.
  *
  * ## Why there is no binarization here
  *
@@ -21,6 +21,25 @@
  * across a whole sheet, and Tesseract's own adaptive thresholding — which sees
  * the full page layout — does a better job. Removing it raised per-frame
  * accuracy from ~39% to ~85%.
+ */
+
+/**
+ * ## Two regions, and why
+ *
+ * The guide the user frames with and the region actually read are **not** the
+ * same box, and separating them is what makes both problems solvable at once:
+ *
+ *  - `SCAN_ROI` — the document guide. Large, so the phone stays at a distance
+ *    where it can focus. It decides *where the user holds the phone*.
+ *  - `FIELD_ROI` — the aim box, inside the guide. It decides *which pixels are
+ *    read*, and it exists because a slip carries several "Protocolo" labels;
+ *    text alone cannot say which one is the one, but position can.
+ *
+ * The crop is taken from the same full-distance frame, so pointing at a small
+ * region costs nothing in focus — the earlier version's failure was the phone
+ * being held inside its minimum focus distance to fill a small guide, not the
+ * cropping itself. Reading less of the frame is also faster, and spends more
+ * pixels per digit.
  */
 
 /** Region of interest, as fractions (0..1) of the *displayed* video box. */
@@ -34,6 +53,53 @@ export type Roi = { x: number; y: number; w: number; h: number }
 export const SCAN_ROI: Roi = { x: 0.04, y: 0.06, w: 0.92, h: 0.86 }
 
 /**
+ * Where the `Protocolo Nº` field goes — the only part of the slip read.
+ *
+ * A starting position, not a fixed one: forms put the field in different
+ * places, so the user drags the box onto it once and the position is
+ * remembered (see `loadFieldRoi`). Still a band rather than a pinhole, so a
+ * field that wraps onto a second line lands inside it.
+ *
+ * Deliberately tight, and tightened twice on measured behaviour. Browsers give
+ * no reliable focus control — none at all on iOS — so the slip ends up held
+ * further back than the guide strictly requires, and further back turns out to
+ * read *better*: the frame is sharper, and sharpness is what the OCR is short
+ * of. At that distance the field occupies less of the frame, so a wide box
+ * stops being "the Protocolo line" and becomes "the Protocolo line plus
+ * whatever is printed around it" — noise that costs read time and hands the
+ * extractor more long numbers to mistake for the right one.
+ *
+ * Note this does *not* cost resolution the way it looks like it should: the
+ * crop is normalised to `OCR_WIDTH` before recognition, so a smaller box is
+ * upscaled more rather than read from fewer effective pixels. Sharpness wins,
+ * which is exactly what holding the page further back buys.
+ *
+ * `SCAN_ROI` above is untouched on purpose, and must stay that way. The guide
+ * decides how far away the phone is held, and shrinking *that* is what caused
+ * the old focus-blur failure — it forced the phone inside its minimum focus
+ * distance. Narrowing only the crop keeps the distance and discards the noise.
+ */
+export const DEFAULT_FIELD_ROI: Roi = { x: 0.24, y: 0.32, w: 0.52, h: 0.09 }
+
+/**
+ * Keep a region inside the guide.
+ *
+ * The aim box is dragged by hand, and one that wandered outside the guide would
+ * read pixels the user was never framing — the scanner would simply stop
+ * finding anything, with nothing on screen to explain why.
+ */
+export function clampRoiInside(roi: Roi, bounds: Roi = SCAN_ROI): Roi {
+  const w = Math.min(roi.w, bounds.w)
+  const h = Math.min(roi.h, bounds.h)
+  return {
+    x: Math.max(bounds.x, Math.min(roi.x, bounds.x + bounds.w - w)),
+    y: Math.max(bounds.y, Math.min(roi.y, bounds.y + bounds.h - h)),
+    w,
+    h,
+  }
+}
+
+/**
  * Width to normalise the crop to before OCR.
  *
  * Measured on the reference photo: 1200px wide runs at roughly 1s per frame
@@ -43,17 +109,16 @@ export const SCAN_ROI: Roi = { x: 0.04, y: 0.06, w: 0.92, h: 0.86 }
 const TARGET_WIDTH = 1200
 
 /**
- * Map the on-screen ROI box onto the video's intrinsic pixel grid.
+ * The `object-fit: cover` transform, from the element's CSS box to the video's
+ * intrinsic pixel grid.
  *
- * The <video> is rendered with `object-fit: cover`, so its CSS box and its
- * intrinsic videoWidth/videoHeight have different aspect ratios and the frame
- * is cropped on one axis. Slicing with raw fractions would silently drift off
- * target — the box the user sees would not be the pixels we read.
+ * The two have different aspect ratios and the frame is cropped on one axis, so
+ * anything that goes from what the user sees to what the camera captured has to
+ * come back through this — reading raw fractions would silently drift off
+ * target. Returns null until the element is laid out and the first frame has
+ * arrived; `videoWidth` is 0 before that.
  */
-export function roiToSourceRect(
-  video: HTMLVideoElement,
-  roi: Roi,
-): { sx: number; sy: number; sw: number; sh: number } | null {
+function coverTransform(video: HTMLVideoElement) {
   const vw = video.videoWidth
   const vh = video.videoHeight
   const cw = video.clientWidth
@@ -62,12 +127,34 @@ export function roiToSourceRect(
 
   // `cover` scales the frame up until it fills both axes, overflowing one.
   const scale = Math.max(cw / vw, ch / vh)
-  const renderedW = vw * scale
-  const renderedH = vh * scale
 
-  // Offsets are <= 0: the overflow is split evenly and clipped on both sides.
-  const offsetX = (cw - renderedW) / 2
-  const offsetY = (ch - renderedH) / 2
+  return {
+    vw,
+    vh,
+    cw,
+    ch,
+    scale,
+    // Offsets are <= 0: the overflow is split evenly and clipped on both sides.
+    offsetX: (cw - vw * scale) / 2,
+    offsetY: (ch - vh * scale) / 2,
+  }
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+/**
+ * Map the on-screen ROI box onto the video's intrinsic pixel grid, so the box
+ * the user frames with is the pixels that actually get read.
+ */
+export function roiToSourceRect(
+  video: HTMLVideoElement,
+  roi: Roi,
+): { sx: number; sy: number; sw: number; sh: number } | null {
+  const transform = coverTransform(video)
+  if (!transform) return null
+  const { vw, vh, cw, ch, scale, offsetX, offsetY } = transform
 
   // ROI in element coordinates, then back through the transform.
   const sx = (roi.x * cw - offsetX) / scale
@@ -83,6 +170,33 @@ export function roiToSourceRect(
     sy: clampedY,
     sw: Math.max(1, Math.min(sw, vw - clampedX)),
     sh: Math.max(1, Math.min(sh, vh - clampedY)),
+  }
+}
+
+/**
+ * Map a point the user tapped — as fractions of the displayed video box — onto
+ * the frame's own coordinate space, also as fractions.
+ *
+ * This is what `pointsOfInterest` wants when telling the camera where to focus:
+ * the point is relative to the **captured frame**, not to the element, and with
+ * `object-fit: cover` those disagree by however much is cropped off the
+ * overflowing axis. Tapping the top of a tall screen would otherwise aim the
+ * autofocus somewhere above the paper entirely.
+ *
+ * Clamped to 0..1: a tap in the cropped-away region has no exact counterpart in
+ * the frame, and the nearest edge is the honest answer.
+ */
+export function pointToSourceFraction(
+  video: HTMLVideoElement,
+  point: { x: number; y: number },
+): { x: number; y: number } | null {
+  const transform = coverTransform(video)
+  if (!transform) return null
+  const { vw, vh, cw, ch, scale, offsetX, offsetY } = transform
+
+  return {
+    x: clamp01((point.x * cw - offsetX) / scale / vw),
+    y: clamp01((point.y * ch - offsetY) / scale / vh),
   }
 }
 

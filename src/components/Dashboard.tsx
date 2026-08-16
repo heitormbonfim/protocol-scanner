@@ -20,12 +20,17 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { ProtocolRow } from '@/components/ProtocolRow'
 import { formatProtocol } from '@/lib/protocol'
-import type { QueueProgress } from '@/lib/queue'
+import {
+  isAsProtocoled,
+  isProtocoled,
+  pendingRecords,
+  type QueueProgress,
+} from '@/lib/queue'
 import type { ProtocolRecord } from '@/types'
 
 type DashboardProps = {
@@ -35,6 +40,8 @@ type DashboardProps = {
   onOpenScanner: () => void
   onEdit: (num: string) => void
   onToggleAs: (num: string) => void
+  onToggleSelected: (num: string) => void
+  onSelectAll: (selected: boolean) => void
   onRetryLookup: (num: string) => void
   onDelete: (num: string) => void
   onClearHistory: () => void
@@ -61,12 +68,10 @@ function Stat({
           ? 'text-warning'
           : 'text-foreground'
   return (
-    <Card>
-      <CardContent className="p-3">
-        <p className={`text-2xl font-bold tabular-nums ${toneClass}`}>{value}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-border/60 bg-card px-3 py-2.5">
+      <p className={`text-xl font-bold tabular-nums ${toneClass}`}>{value}</p>
+      <p className="text-[11px] leading-tight text-muted-foreground">{label}</p>
+    </div>
   )
 }
 
@@ -77,6 +82,8 @@ export function Dashboard({
   onOpenScanner,
   onEdit,
   onToggleAs,
+  onToggleSelected,
+  onSelectAll,
   onRetryLookup,
   onDelete,
   onClearHistory,
@@ -86,68 +93,89 @@ export function Dashboard({
 }: DashboardProps) {
   const [query, setQuery] = useState('')
 
+  /** Records with work left that the user has actually left ticked. */
+  const toSend = useMemo(() => pendingRecords(records), [records])
+
+  /** Records with work left, ticked or not — the denominator for the header. */
+  const outstanding = useMemo(
+    () =>
+      records.filter(
+        (record) =>
+          !isProtocoled(record) || (record.withAs && !isAsProtocoled(record)),
+      ),
+    [records],
+  )
+
   const stats = useMemo(
     () => ({
       total: records.length,
-      pending: records.filter((r) => r.protocol.status === 'idle').length,
-      done: records.filter((r) => r.protocol.status === 'success').length,
+      pending: toSend.length,
+      done: records.filter(isProtocoled).length,
       failed: records.filter(
-        (r) =>
-          r.protocol.status === 'failed' ||
-          (r.withAs && (r.as.status === 'failed' || r.as.status === 'skipped')),
+        (record) =>
+          record.protocol.status === 'failed' ||
+          (record.withAs &&
+            (record.as.status === 'failed' || record.as.status === 'skipped')),
       ).length,
     }),
-    [records],
+    [records, toSend],
   )
 
   const filtered = useMemo(() => {
     const digits = query.replace(/\D/g, '')
     if (!digits) return records
-    return records.filter((r) => r.num.includes(digits))
+    return records.filter((record) => record.num.includes(digits))
   }, [records, query])
 
   const hasResults = records.some(
-    (r) => r.protocol.status === 'success' || r.protocol.status === 'failed',
+    (record) =>
+      isProtocoled(record) ||
+      record.protocol.status === 'failed' ||
+      record.as.status === 'failed',
   )
+
   const percent =
     progress && progress.total > 0
       ? Math.round((progress.done / progress.total) * 100)
       : 0
 
+  const allSelected = outstanding.length > 0 && toSend.length === outstanding.length
+  const noneSelected = toSend.length === 0
+  const selectionState = allSelected
+    ? true
+    : noneSelected
+      ? false
+      : ('indeterminate' as const)
+
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col">
-      <header className="pt-safe flex items-center justify-between gap-3 px-4 pb-3">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Leitor de Protocolos</h1>
-          <p className="text-sm text-muted-foreground">
-            {stats.total === 0
-              ? 'Nenhum protocolo no histórico'
-              : `${stats.total} no histórico`}
-          </p>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header className="pt-safe sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-md">
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-bold tracking-tight">
+              Leitor de Protocolos
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              {stats.total === 0
+                ? 'Nenhum protocolo no histórico'
+                : `${stats.total} no histórico · ${stats.done} protocolados`}
+            </p>
+          </div>
+          {hasResults && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={onViewResults}
+            >
+              <FileText /> Relatório
+            </Button>
+          )}
         </div>
-        {hasResults && (
-          <Button variant="outline" size="sm" onClick={onViewResults}>
-            <FileText /> Relatório
-          </Button>
-        )}
       </header>
 
-      <div className="space-y-4 px-4">
-        <Button size="lg" className="w-full" onClick={onOpenScanner} disabled={running}>
-          <Camera /> Escanear protocolos
-        </Button>
-
-        {stats.total > 0 && (
-          <div className="grid grid-cols-4 gap-2">
-            <Stat label="Total" value={stats.total} />
-            <Stat label="A enviar" value={stats.pending} />
-            <Stat label="Enviados" value={stats.done} tone="success" />
-            <Stat label="Falhas" value={stats.failed} tone="destructive" />
-          </div>
-        )}
-      </div>
-
-      {/* ── History ────────────────────────────────────────────────────────── */}
+      {/* ── Content ────────────────────────────────────────────────────────── */}
       {records.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <div className="rounded-2xl bg-secondary p-5">
@@ -160,7 +188,14 @@ export function Dashboard({
           </p>
         </div>
       ) : (
-        <div className="mt-4 flex flex-1 flex-col gap-3 px-4">
+        <div className="flex flex-1 flex-col gap-3 px-4 py-4">
+          <div className="grid grid-cols-4 gap-2">
+            <Stat label="Total" value={stats.total} />
+            <Stat label="A enviar" value={stats.pending} />
+            <Stat label="Protocolados" value={stats.done} tone="success" />
+            <Stat label="Falhas" value={stats.failed} tone="destructive" />
+          </div>
+
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -202,12 +237,31 @@ export function Dashboard({
             </AlertDialog>
           </div>
 
+          {/* Bulk selection, so leaving a few out does not mean many taps. */}
+          {outstanding.length > 0 && (
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-border/60 bg-card/60 px-3 py-2.5 text-sm">
+              <Checkbox
+                className="size-5"
+                checked={selectionState}
+                disabled={running}
+                onCheckedChange={() => onSelectAll(!allSelected)}
+                aria-label="Selecionar todos para protocolar"
+              />
+              <span className="text-muted-foreground">
+                <span className="font-medium text-foreground tabular-nums">
+                  {toSend.length}
+                </span>{' '}
+                de {outstanding.length} selecionados para protocolar
+              </span>
+            </label>
+          )}
+
           {filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               Nenhum protocolo contém “{query}”.
             </p>
           ) : (
-            <ul className="space-y-2 pb-4">
+            <ul className="space-y-2 pb-2">
               {filtered.map((record) => (
                 <ProtocolRow
                   key={record.num}
@@ -215,6 +269,7 @@ export function Dashboard({
                   busy={running}
                   onEdit={onEdit}
                   onToggleAs={onToggleAs}
+                  onToggleSelected={onToggleSelected}
                   onRetryLookup={onRetryLookup}
                   onDelete={onDelete}
                 />
@@ -224,33 +279,56 @@ export function Dashboard({
         </div>
       )}
 
-      {/* ── Sticky action bar ──────────────────────────────────────────────── */}
-      {records.length > 0 && (
-        <div className="pb-safe sticky bottom-0 mt-auto space-y-2 border-t border-border bg-background/95 px-4 pt-3 backdrop-blur">
-          {running && progress ? (
-            <>
-              <Progress value={percent} />
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground">
-                  {progress.done} de {progress.total}
-                  {progress.current && (
-                    <span className="ml-1 font-mono">
-                      {formatProtocol(progress.current)}
-                    </span>
-                  )}
-                </p>
-                <Button variant="outline" size="sm" onClick={onAbort}>
-                  <Square /> Parar
-                </Button>
-              </div>
-            </>
-          ) : (
-            <Button size="lg" className="w-full" onClick={onProtocolAll}>
-              <Send /> Protocolar todos
+      {/* ── Bottom action dock ─────────────────────────────────────────────── */}
+      {/*
+        Everything you press repeatedly lives down here: on a phone held one
+        handed, the top of the screen is the hardest place to reach, and this
+        app is used standing up with a stack of paper in the other hand.
+      */}
+      <div className="pb-safe sticky bottom-0 z-20 mt-auto border-t border-border/60 bg-background/95 px-4 pt-3 backdrop-blur-md">
+        {running && progress ? (
+          <div className="space-y-2 pb-3">
+            <Progress value={percent} />
+            <div className="flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate text-sm text-muted-foreground">
+                {progress.done} de {progress.total}
+                {progress.current && (
+                  <span className="ml-1 font-mono">
+                    {formatProtocol(progress.current)}
+                  </span>
+                )}
+              </p>
+              <Button variant="outline" size="lg" onClick={onAbort}>
+                <Square /> Parar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2 pb-3">
+            <Button
+              size="lg"
+              variant={records.length === 0 ? 'default' : 'outline'}
+              className="flex-1"
+              onClick={onOpenScanner}
+            >
+              <Camera /> Escanear
             </Button>
-          )}
-        </div>
-      )}
+            {records.length > 0 && (
+              <Button
+                size="lg"
+                className="flex-[1.4]"
+                onClick={onProtocolAll}
+                disabled={toSend.length === 0}
+              >
+                <Send />
+                {toSend.length === 0
+                  ? 'Nada a enviar'
+                  : `Protocolar ${toSend.length}`}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

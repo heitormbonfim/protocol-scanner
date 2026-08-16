@@ -27,3 +27,16 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Images
+*.heic
+*.jpg
+*.jpeg
+
+# Development certificates (pnpm cert).
+# Never commit these: dev-ca.key would let anyone mint certificates that the
+# phones you installed the CA on would trust without warning.
+certs/
+*.key
+*.crt
+*.pem

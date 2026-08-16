@@ -107,8 +107,29 @@ function segmentAfter(pathname: string, base: string): string | null {
   return rest.length > 0 && !rest.includes('/') ? decodeURIComponent(rest) : null
 }
 
+/**
+ * An endpoint as this middleware will see it: a path.
+ *
+ * The three URLs come straight from `.env`, where they are often absolute
+ * (`https://real-service.example/protocolo`). The middleware only ever compares
+ * against `req.url`, which is a path, so an absolute value would match nothing
+ * and every request would fall through — mocking on, and yet real submissions
+ * going out. `src/lib/config.ts` performs the matching rewrite on the client so
+ * the two agree.
+ */
+function toPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
+
 export function mockApi(options: MockApiOptions): Plugin {
-  const { enabled, lookupUrl, protocolUrl, protocolAsUrl, token } = options
+  const { enabled, token } = options
+  const lookupUrl = toPath(options.lookupUrl)
+  const protocolUrl = toPath(options.protocolUrl)
+  const protocolAsUrl = toPath(options.protocolAsUrl)
   const delayMs = options.delayMs ?? MOCK_DELAY_MS
 
   // Deliberately method-agnostic: `src/lib/api.ts` picks a method per call, and
@@ -153,9 +174,9 @@ export function mockApi(options: MockApiOptions): Plugin {
         // The number arrives in the query string on a GET and in the body on
         // anything else, so a lookup switched to POST still resolves.
         const body = await readJsonBody(req)
-        const fromBody = body.numprotocol ?? body.num
+        const fromBody = body.protocoloId ?? body.num
         reply = lookupReply(
-          url.searchParams.get('numprotocol') ??
+          url.searchParams.get('protocoloId') ??
             (typeof fromBody === 'string' ? fromBody : null),
         )
       }

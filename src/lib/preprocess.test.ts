@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SCAN_ROI, roiToSourceRect } from './preprocess'
+import {
+  DEFAULT_FIELD_ROI,
+  SCAN_ROI,
+  clampRoiInside,
+  pointToSourceFraction,
+  roiToSourceRect,
+} from './preprocess'
 
 /**
  * `roiToSourceRect` maps the framing box the user sees onto the video's
@@ -93,6 +99,66 @@ describe('roiToSourceRect', () => {
   })
 })
 
+describe('pointToSourceFraction', () => {
+  /**
+   * Where tap-to-focus aims. The same `cover` crop applies, so a tap near the
+   * top of a tall screen is *not* near the top of the frame — getting this
+   * wrong points the autofocus at something other than the paper, and the only
+   * symptom is that focusing seems not to work.
+   */
+  it('returns null before the stream has dimensions', () => {
+    expect(pointToSourceFraction(fakeVideo(0, 0, 400, 800), { x: 0.5, y: 0.5 })).toBeNull()
+  })
+
+  it('maps the centre to the centre', () => {
+    const point = pointToSourceFraction(fakeVideo(1920, 1080, 400, 800), {
+      x: 0.5,
+      y: 0.5,
+    })
+    expect(point!.x).toBeCloseTo(0.5, 5)
+    expect(point!.y).toBeCloseTo(0.5, 5)
+  })
+
+  it('passes fractions straight through when aspect ratios match', () => {
+    const point = pointToSourceFraction(fakeVideo(1000, 1000, 500, 500), {
+      x: 0.25,
+      y: 0.75,
+    })
+    expect(point!.x).toBeCloseTo(0.25, 5)
+    expect(point!.y).toBeCloseTo(0.75, 5)
+  })
+
+  it('compresses the axis that cover crops', () => {
+    // Landscape camera, portrait element: the sides are clipped, so the full
+    // width of the screen only spans the middle band of the frame.
+    const left = pointToSourceFraction(fakeVideo(1920, 1080, 400, 800), {
+      x: 0,
+      y: 0.5,
+    })
+    expect(left!.x).toBeCloseTo(690 / 1920, 4)
+    expect(left!.x).toBeGreaterThan(0)
+  })
+
+  it('clamps a tap in the cropped-away region to the frame edge', () => {
+    const point = pointToSourceFraction(fakeVideo(1080, 1920, 800, 400), {
+      x: 0.5,
+      y: 1.4,
+    })
+    expect(point!.y).toBeLessThanOrEqual(1)
+    expect(point!.y).toBeGreaterThanOrEqual(0)
+  })
+
+  it('agrees with the ROI mapping at the same on-screen point', () => {
+    // Both go through the same transform; if they ever disagree, the guide and
+    // the focus point are describing different places.
+    const video = fakeVideo(1920, 1080, 400, 800)
+    const rect = roiToSourceRect(video, { x: 0.25, y: 0.4, w: 0.1, h: 0.1 })
+    const point = pointToSourceFraction(video, { x: 0.25, y: 0.4 })
+    expect(point!.x).toBeCloseTo(rect!.sx / 1920, 5)
+    expect(point!.y).toBeCloseTo(rect!.sy / 1080, 5)
+  })
+})
+
 describe('SCAN_ROI', () => {
   it('stays inside the frame', () => {
     expect(SCAN_ROI.x).toBeGreaterThanOrEqual(0)
@@ -106,5 +172,67 @@ describe('SCAN_ROI', () => {
     // phone closer than its minimum focus distance and every frame comes back
     // blurred. If someone shrinks this back into a thin strip, this fails.
     expect(SCAN_ROI.w * SCAN_ROI.h).toBeGreaterThan(0.5)
+  })
+})
+
+describe('clampRoiInside', () => {
+  /**
+   * The aim box is dragged by hand and persisted, so it is the one region that
+   * can arrive at `preprocessFrame` holding anything at all. A box outside the
+   * guide reads pixels the user is not framing, and the only symptom is a
+   * scanner that quietly finds nothing.
+   */
+  it('leaves a box that already fits alone', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
+  })
+
+  it('pulls a box back inside when dragged off each edge', () => {
+    const right = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: 5 })
+    expect(right.x + right.w).toBeCloseTo(SCAN_ROI.x + SCAN_ROI.w, 5)
+
+    const left = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: -5 })
+    expect(left.x).toBeCloseTo(SCAN_ROI.x, 5)
+
+    const below = clampRoiInside({ ...DEFAULT_FIELD_ROI, y: 5 })
+    expect(below.y + below.h).toBeCloseTo(SCAN_ROI.y + SCAN_ROI.h, 5)
+
+    const above = clampRoiInside({ ...DEFAULT_FIELD_ROI, y: -5 })
+    expect(above.y).toBeCloseTo(SCAN_ROI.y, 5)
+  })
+
+  it('keeps the size when only the position is out of bounds', () => {
+    const clamped = clampRoiInside({ ...DEFAULT_FIELD_ROI, x: 9, y: 9 })
+    expect(clamped.w).toBe(DEFAULT_FIELD_ROI.w)
+    expect(clamped.h).toBe(DEFAULT_FIELD_ROI.h)
+  })
+
+  it('shrinks a box too large for the guide rather than overflowing it', () => {
+    const clamped = clampRoiInside({ x: 0, y: 0, w: 3, h: 3 })
+    expect(clamped).toEqual(SCAN_ROI)
+  })
+})
+
+describe('DEFAULT_FIELD_ROI', () => {
+  it('starts inside the document guide', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
+  })
+
+  it('is a band, not a pinhole — a whole number still has to fit', () => {
+    /*
+     * A floor, not a restatement of the current value. The box has been
+     * tightened twice as the working distance grew, and that is fine — but
+     * below roughly this size it stops covering a protocol line at all, and the
+     * scanner would simply never find anything with nothing on screen to say
+     * why.
+     */
+    expect(DEFAULT_FIELD_ROI.w).toBeGreaterThanOrEqual(0.35)
+    expect(DEFAULT_FIELD_ROI.h).toBeGreaterThanOrEqual(0.06)
+
+    // And it frames one line of text, so it stays much wider than it is tall.
+    expect(DEFAULT_FIELD_ROI.w / DEFAULT_FIELD_ROI.h).toBeGreaterThan(3)
+  })
+
+  it('still sits inside the guide at its new size', () => {
+    expect(clampRoiInside(DEFAULT_FIELD_ROI)).toEqual(DEFAULT_FIELD_ROI)
   })
 })

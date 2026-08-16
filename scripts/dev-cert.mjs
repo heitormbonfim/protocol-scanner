@@ -1,0 +1,194 @@
+#!/usr/bin/env node
+/**
+ * Generates a development certificate that phones can actually trust.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * `@vitejs/plugin-basic-ssl` issues a certificate valid only for `localhost`
+ * and `127.0.0.1`. A phone reaches the dev server at its LAN address, which is
+ * not in that certificate, so every browser flags the origin — and a browser
+ * refuses to register a service worker on an origin with a certificate error.
+ * That is why the app would only ever add a home-screen *shortcut* instead of
+ * installing: no worker, no install. iOS is stricter still and may not offer to
+ * proceed at all.
+ *
+ * This issues two things instead:
+ *
+ *   1. A local certificate authority (`dev-ca.crt`). Install this **once** on
+ *      each phone. It is long-lived and never changes, so a device trusts it
+ *      permanently.
+ *   2. A server certificate signed by that CA, listing `localhost`, the
+ *      loopback addresses, and every LAN address this machine currently has.
+ *      Regenerated freely — re-running after your DHCP lease changes costs
+ *      nothing and does *not* require re-trusting anything on the phone.
+ *
+ * The server certificate is issued for 397 days on purpose: Apple rejects TLS
+ * server certificates valid for more than 398.
+ *
+ * Everything lands in `certs/`, which is git-ignored — these are secrets, and a
+ * committed CA key would let anyone mint certificates your devices trust.
+ *
+ * Usage:  pnpm cert
+ */
+
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
+import { resolve } from "node:path";
+
+const CERT_DIR = resolve(process.cwd(), "certs");
+const CA_KEY = resolve(CERT_DIR, "dev-ca.key");
+const CA_CRT = resolve(CERT_DIR, "dev-ca.crt");
+const SERVER_KEY = resolve(CERT_DIR, "dev-server.key");
+const SERVER_CRT = resolve(CERT_DIR, "dev-server.crt");
+const SERVER_CSR = resolve(CERT_DIR, "dev-server.csr");
+const SERVER_EXT = resolve(CERT_DIR, "dev-server.ext");
+
+function openssl(args) {
+  return execFileSync("openssl", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function requireOpenssl() {
+  try {
+    openssl(["version"]);
+  } catch {
+    console.error(
+      "\n  openssl is required and was not found on PATH.\n" +
+        "  Debian/Ubuntu:  sudo apt install openssl\n" +
+        "  macOS:          brew install openssl\n",
+    );
+    process.exit(1);
+  }
+}
+
+/** Every non-internal IPv4 address this machine answers on. */
+function lanAddresses() {
+  const found = [];
+  for (const [iface, addresses] of Object.entries(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      // `family` is the number 4 on some Node versions and the string 'IPv4'
+      // on others; accept both rather than depend on which.
+      const isIPv4 = address.family === "IPv4" || address.family === 4;
+      if (isIPv4 && !address.internal) {
+        found.push({ iface, address: address.address });
+      }
+    }
+  }
+  return found;
+}
+
+function createCa() {
+  if (existsSync(CA_KEY) && existsSync(CA_CRT)) {
+    console.log("  CA          reusing certs/dev-ca.crt (already trusted on your devices)");
+    return false;
+  }
+
+  openssl([
+    "req",
+    "-x509",
+    "-newkey", "rsa:2048",
+    "-sha256",
+    "-days", "3650",
+    "-nodes",
+    "-keyout", CA_KEY,
+    "-out", CA_CRT,
+    "-subj", "/CN=Leitor de Protocolos Dev CA/O=Leitor de Protocolos",
+    "-addext", "basicConstraints=critical,CA:TRUE,pathlen:0",
+    "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+  ]);
+
+  console.log("  CA          created certs/dev-ca.crt");
+  return true;
+}
+
+function createServerCert(names) {
+  const san = names.map((n) => (n.kind === "dns" ? `DNS:${n.value}` : `IP:${n.value}`)).join(",");
+
+  writeFileSync(
+    SERVER_EXT,
+    [
+      "basicConstraints=CA:FALSE",
+      "keyUsage=critical,digitalSignature,keyEncipherment",
+      // Required by iOS 13+ for any TLS server certificate.
+      "extendedKeyUsage=serverAuth",
+      `subjectAltName=${san}`,
+      "",
+    ].join("\n"),
+  );
+
+  openssl([
+    "req",
+    "-newkey", "rsa:2048",
+    "-sha256",
+    "-nodes",
+    "-keyout", SERVER_KEY,
+    "-out", SERVER_CSR,
+    "-subj", "/CN=Leitor de Protocolos dev server",
+  ]);
+
+  openssl([
+    "x509",
+    "-req",
+    "-in", SERVER_CSR,
+    "-CA", CA_CRT,
+    "-CAkey", CA_KEY,
+    "-CAcreateserial",
+    "-out", SERVER_CRT,
+    // Apple rejects anything above 398 days.
+    "-days", "397",
+    "-sha256",
+    "-extfile", SERVER_EXT,
+  ]);
+
+  rmSync(SERVER_CSR, { force: true });
+  rmSync(SERVER_EXT, { force: true });
+}
+
+function main() {
+  requireOpenssl();
+  mkdirSync(CERT_DIR, { recursive: true });
+
+  const lan = lanAddresses();
+  const names = [
+    { kind: "dns", value: "localhost" },
+    { kind: "ip", value: "127.0.0.1" },
+    { kind: "ip", value: "::1" },
+    ...lan.map((entry) => ({ kind: "ip", value: entry.address })),
+  ];
+
+  console.log("");
+  const freshCa = createCa();
+  createServerCert(names);
+  console.log("  server      created certs/dev-server.crt (397 days)");
+
+  console.log("\n  Covers:");
+  for (const name of names) {
+    console.log(`    ${name.value}`);
+  }
+
+  if (lan.length === 0) {
+    console.log(
+      "\n  No LAN address found — you are probably offline. The certificate\n" +
+        "  covers localhost only; re-run once you are on the network.",
+    );
+  }
+
+  console.log("\n  Next:");
+  console.log("    1. pnpm build && pnpm preview   (the worker only registers in a production build)");
+  for (const entry of lan) {
+    console.log(`    2. On the phone, open  https://${entry.address}:4173/dev-ca.crt  to install the CA`);
+    break;
+  }
+  console.log("    3. Android: Settings > Security > Encryption & credentials > Install a certificate > CA");
+  console.log("       iOS:     open the file, then Settings > General > VPN & Device Management > install,");
+  console.log("                then Settings > General > About > Certificate Trust Settings > enable it");
+  console.log("    4. Reload the app — it should now offer to install rather than add a shortcut.");
+
+  if (!freshCa) {
+    console.log("\n  The CA was reused, so devices that already trust it need no change.");
+  }
+  console.log("");
+}
+
+main();

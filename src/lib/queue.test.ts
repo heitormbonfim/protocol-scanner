@@ -5,14 +5,27 @@ import { pendingRecords, recordOutcomes, runProtocolQueue } from './queue'
 import { server } from '../mocks/server'
 import type { ProtocolRecord } from '../types'
 
-/** Records every request the queue makes, in order. */
+/** Records every request the queue makes, in order, as absolute URLs. */
 function trackRequests() {
   const calls: string[] = []
   server.events.on('request:start', ({ request }) => {
-    const path = new URL(request.url).pathname
-    calls.push(path)
+    calls.push(request.url)
   })
   return calls
+}
+
+/**
+ * The absolute URL a configured endpoint resolves to, built exactly as
+ * `resolveUrl` in `api.ts` builds it.
+ *
+ * Endpoints may be relative or absolute depending on the environment, so these
+ * assertions compare resolved URLs rather than bare pathnames. Exact matches
+ * rather than `startsWith`, too: the AS endpoint's path routinely begins with
+ * the ordinary one's (`…/protocols` and `…/protocols-as`), so a prefix test
+ * cannot tell the two apart.
+ */
+function endpoint(path: string): string {
+  return new URL(path, location.origin).href
 }
 
 function makeRecord(overrides: Partial<ProtocolRecord> = {}): ProtocolRecord {
@@ -59,16 +72,15 @@ describe('runProtocolQueue — the AS rule', () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: false })])
 
-    expect(calls.some((path) => path.startsWith(PROTOCOL_AS_URL))).toBe(false)
-    expect(calls.some((path) => path.startsWith(PROTOCOL_URL))).toBe(true)
+    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217719`)])
   })
 
   it('calls the ordinary protocol BEFORE AS, never the other way round', async () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: true })])
 
-    const protocolAt = calls.findIndex((p) => p === `${PROTOCOL_URL}/PRT-217719`)
-    const asAt = calls.findIndex((p) => p === `${PROTOCOL_AS_URL}/PRT-217719`)
+    const protocolAt = calls.indexOf(endpoint(`${PROTOCOL_URL}/PRT-217719`))
+    const asAt = calls.indexOf(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
     expect(protocolAt).toBeGreaterThanOrEqual(0)
     expect(asAt).toBeGreaterThan(protocolAt)
   })
@@ -76,14 +88,14 @@ describe('runProtocolQueue — the AS rule', () => {
   it('does NOT send AS when the ordinary protocol fails', async () => {
     // The core invariant: AS is an add-on, never valid on its own.
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${PROTOCOL_URL}/:id`, () =>
         HttpResponse.text('falhou', { status: 500 }),
       ),
     )
     const calls = trackRequests()
     const outcomes = await runProtocolQueue([makeRecord({ withAs: true })])
 
-    expect(calls.some((path) => path.startsWith(PROTOCOL_AS_URL))).toBe(false)
+    expect(calls).not.toContain(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
 
     const as = outcomes.find((outcome) => outcome.kind === 'as')
     expect(as?.ok).toBe(false)
@@ -124,7 +136,108 @@ describe('runProtocolQueue — the AS rule', () => {
       makeRecord({ withAs: true, protocol: { status: 'success' } }),
     ])
 
-    expect(calls).toEqual([`${PROTOCOL_AS_URL}/PRT-217719`])
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+  })
+})
+
+describe('never files the same protocol twice', () => {
+  /**
+   * The regression this exists for.
+   *
+   * A record whose protocol succeeded but whose AS is still pending goes back
+   * into the queue. The dashboard marks whatever is in flight as `running`, and
+   * because the protocol leg is skipped that step never settles again — the
+   * stored `success` is gone. Judged on `protocol.status` alone the next run
+   * files the protocol a second time, against a live service, with no undo.
+   *
+   * `protocoled` is sticky precisely so none of that matters.
+   */
+  it('does not re-send a protocol whose step state was left mid-run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({
+        withAs: true,
+        protocoled: true,
+        // Exactly the state the clobber leaves behind.
+        protocol: { status: 'running' },
+      }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+  })
+
+  it('does not re-send a protocol left idle by an interrupted run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({ withAs: true, protocoled: true, protocol: { status: 'idle' } }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+  })
+
+  it('never re-sends an AS that already went out', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({
+        withAs: true,
+        protocoled: true,
+        asProtocoled: true,
+        protocol: { status: 'running' },
+        as: { status: 'running' },
+      }),
+    ])
+
+    expect(calls).toEqual([])
+  })
+
+  it('keeps a fully-filed record out of the queue even with unsettled steps', () => {
+    const done = makeRecord({
+      withAs: true,
+      protocoled: true,
+      asProtocoled: true,
+      protocol: { status: 'running' },
+      as: { status: 'idle' },
+    })
+
+    expect(pendingRecords([done])).toHaveLength(0)
+  })
+
+  it('still sends a protocol that genuinely has not been filed', () => {
+    // The counterpart: the flag must not wedge the queue shut.
+    const fresh = makeRecord({ protocoled: false, protocol: { status: 'idle' } })
+    expect(pendingRecords([fresh])).toHaveLength(1)
+  })
+})
+
+describe('records left out of the run', () => {
+  it('sends nothing at all for an unticked record', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([makeRecord({ withAs: true, selected: false })])
+
+    expect(calls).toEqual([])
+  })
+
+  it('keeps an unticked record out of the queue', () => {
+    expect(pendingRecords([makeRecord({ selected: false })])).toHaveLength(0)
+  })
+
+  it('treats a record with no flag as included', () => {
+    // Absent means included: a history written before the checkbox existed must
+    // not come back with everything silently left out.
+    const record = makeRecord()
+    delete (record as Partial<ProtocolRecord>).selected
+    expect(pendingRecords([record])).toHaveLength(1)
+  })
+
+  it('sends the ticked ones and skips the rest in the same run', async () => {
+    const calls = trackRequests()
+    await runProtocolQueue([
+      makeRecord({ num: '202601300217701', id: 'PRT-217701', selected: false }),
+      makeRecord({ num: '202601300217702', id: 'PRT-217702', selected: true }),
+      makeRecord({ num: '202601300217703', id: 'PRT-217703', selected: false }),
+    ])
+
+    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217702`)])
   })
 })
 
@@ -133,7 +246,7 @@ describe('runProtocolQueue — sequencing', () => {
     let inFlight = 0
     let maxInFlight = 0
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, async () => {
+      http.all(`${PROTOCOL_URL}/:id`, async () => {
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         await new Promise((resolve) => setTimeout(resolve, 5))
@@ -170,7 +283,7 @@ describe('runProtocolQueue — sequencing', () => {
     const calls = trackRequests()
 
     server.use(
-      http.get(`${PROTOCOL_URL}/:id`, () => {
+      http.all(`${PROTOCOL_URL}/:id`, () => {
         controller.abort()
         return HttpResponse.json({ ok: true })
       }),

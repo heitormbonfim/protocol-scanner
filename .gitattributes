@@ -1,0 +1,19 @@
+# Normalize every text file to LF in the repo and on checkout, on every
+# platform. Without this, a tree copied through Windows comes back CRLF and
+# every line of every file reads as modified.
+* text=auto eol=lf
+
+# Binary assets: never touch the bytes.
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.gif   binary
+*.webp  binary
+*.heic  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+
+# Lockfiles are generated; collapse them in diffs and reviews.
+pnpm-lock.yaml linguist-generated=true -diff

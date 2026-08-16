@@ -31,6 +31,15 @@ export type ProtocolRecord = {
    * ordinary protocol, never a substitute for it.
    */
   withAs: boolean
+  /**
+   * Whether this record is included in the next run.
+   *
+   * Unticking leaves a slip in the history but sends nothing for it at all —
+   * separate from `withAs`, which only chooses whether AS accompanies the
+   * ordinary protocol. Defaults to included, so a scan is never silently left
+   * out of a batch by omission.
+   */
+  selected?: boolean
   lookup: {
     /**
      * 'pending' while the confirm-time GET is in flight. The record is stored
@@ -44,9 +53,25 @@ export type ProtocolRecord = {
   protocol: StepState
   /** The AS submission. Only attempted when `withAs` and `protocol` succeeded. */
   as: StepState
+  /**
+   * This protocol has been filed. Sticky, and the authority on whether to send.
+   *
+   * `protocol.status` cannot carry this on its own because it is display state
+   * and gets overwritten: a record whose protocol already succeeded but whose
+   * AS is still pending is put back in the queue, marked `running` for the AS
+   * leg, and never re-settled — losing the `success` and causing the next run
+   * to file the protocol a second time. A submission has no undo, so the fact
+   * that it happened is kept in a field nothing but a new number clears.
+   *
+   * Only ever cleared by `handleSaveEdit`, where a corrected number invalidates
+   * the id and makes this a different submission.
+   */
+  protocoled?: boolean
+  /** The same, for the AS submission. */
+  asProtocoled?: boolean
 }
 
-/** Result of `GET {LOOKUP_URL}?numprotocol=<num>` — resolves a number to an id. */
+/** Result of `GET {LOOKUP_URL}?protocoloId=<num>` — resolves a number to an id. */
 export type LookupResult =
   | { ok: true; id: string }
   | { ok: false; reason: string; httpStatus?: number }
