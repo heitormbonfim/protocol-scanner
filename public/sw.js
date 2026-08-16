@@ -24,7 +24,7 @@
  * Bump VERSION to retire every previous cache on the next activation.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `shell-${VERSION}`;
 const ASSET_CACHE = `assets-${VERSION}`;
 const VENDOR_CACHE = `vendor-${VERSION}`;

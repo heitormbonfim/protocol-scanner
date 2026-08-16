@@ -7,49 +7,72 @@
  * shadcn/ui token layer, Tailwind v4 style: colours are declared as CSS custom
  * properties and registered with `@theme inline` so utilities like `bg-card`
  * and `text-muted-foreground` resolve to them.
- *
- * The app is dark by default — it is used standing over a stack of paper, often
- * indoors, and a full-bleed camera view next to a white UI is unpleasant.
  */
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Palette: Mais Cidadão (see public/logo.jpeg). The brand is a green
+ * (#1C8960 / #3BAF68) and a blue (#1C83B0 / #1EA1D5).
+ *
+ * Green leads, as it does in Mais Cidadão itself: `primary` is the brand green,
+ * and the blue is kept for supporting roles — focus rings, hover surfaces, and
+ * the tint under the neutrals (hue 235, so the greys read as brand rather than
+ * as a foreign grey).
+ *
+ * Light theme throughout, the camera screen included. Both brand colours are
+ * mid-luminance, so on a white ground they are deepened to the point where they
+ * carry white text at 4.5:1 — the hue is the brand's, the lightness is what
+ * legibility requires.
+ */
 :root {
   --radius: 0.75rem;
 
-  --background: oklch(0.145 0.01 285);
-  --foreground: oklch(0.96 0.005 285);
+  --background: oklch(0.985 0.003 235);
+  --foreground: oklch(0.22 0.025 250);
 
-  --card: oklch(0.19 0.012 285);
-  --card-foreground: oklch(0.96 0.005 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.025 250);
 
-  --popover: oklch(0.19 0.012 285);
-  --popover-foreground: oklch(0.96 0.005 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.025 250);
 
-  --primary: oklch(0.62 0.19 295);
-  --primary-foreground: oklch(0.98 0.005 285);
+  /* The brand green, deepened to #098356 so white text clears AA on it. */
+  --primary: oklch(0.54 0.12 160);
+  --primary-foreground: oklch(0.99 0.005 235);
 
-  --secondary: oklch(0.25 0.014 285);
-  --secondary-foreground: oklch(0.96 0.005 285);
+  --secondary: oklch(0.965 0.008 235);
+  --secondary-foreground: oklch(0.28 0.025 250);
 
-  --muted: oklch(0.25 0.014 285);
-  --muted-foreground: oklch(0.68 0.015 285);
+  --muted: oklch(0.965 0.008 235);
+  --muted-foreground: oklch(0.5 0.022 240);
 
-  --accent: oklch(0.28 0.02 295);
-  --accent-foreground: oklch(0.96 0.005 285);
+  /* Blue, part one: hover surfaces. */
+  --accent: oklch(0.95 0.03 232);
+  --accent-foreground: oklch(0.35 0.08 232);
 
-  --destructive: oklch(0.62 0.21 22);
-  --destructive-foreground: oklch(0.98 0.005 285);
+  --destructive: oklch(0.55 0.21 25);
+  --destructive-foreground: oklch(0.99 0.005 235);
 
-  --success: oklch(0.68 0.16 155);
-  --success-foreground: oklch(0.16 0.02 155);
+  /*
+   * Yellower and a shade lighter than `primary` — both are brand green, and a
+   * "Protocolado" badge has to stay tellable from a green action button.
+   */
+  --success: oklch(0.52 0.145 148);
+  --success-foreground: oklch(0.99 0.005 235);
 
-  --warning: oklch(0.76 0.14 75);
-  --warning-foreground: oklch(0.18 0.03 75);
+  --warning: oklch(0.54 0.15 75);
+  --warning-foreground: oklch(0.99 0.005 235);
 
-  --border: oklch(0.28 0.014 285);
-  --input: oklch(0.28 0.014 285);
-  --ring: oklch(0.62 0.19 295);
+  --border: oklch(0.905 0.012 235);
+  --input: oklch(0.88 0.014 235);
+
+  /*
+   * Blue, part two: the focus ring. Deliberately not `primary` — a focus
+   * indicator that matches the button it is on is hard to see, and the blue
+   * reads clearly against both the green controls and white paper.
+   */
+  --ring: oklch(0.54 0.13 232);
 }
 
 @theme inline {
@@ -89,7 +112,7 @@
   }
 
   html {
-    color-scheme: dark;
+    color-scheme: light;
     -webkit-text-size-adjust: 100%;
   }
 

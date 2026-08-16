@@ -8,8 +8,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#101116",
-  "theme_color": "#101116",
+  "background_color": "#F8FAFC",
+  "theme_color": "#F8FAFC",
   "categories": ["productivity", "utilities"],
   "icons": [
     {

@@ -219,6 +219,9 @@ export function ScannerView({
      * so without this the Escanear and Protocolar buttons sat on top of the
      * camera — visible and clickable while scanning. Kept below the dialog
      * layer (z-50) so the confirm sheet still comes out in front.
+     *
+     * `bg-black` is only the backdrop the video letterboxes against; the
+     * chrome on top of it is the same light theme as the rest of the app.
      */
     <div className="fixed inset-0 z-40 bg-black">
       {/* Always mounted so the ref is stable when `start` attaches the stream. */}
@@ -303,7 +306,8 @@ export function ScannerView({
             onKeyDown={handleBoxKeyDown}
             className={cn(
               'pointer-events-auto absolute touch-none rounded-lg border-2 border-primary bg-primary/10 outline-none',
-              'focus-visible:ring-2 focus-visible:ring-white',
+              // `ring-ring` (blue), not white: the box sits on the white slip.
+              'focus-visible:ring-2 focus-visible:ring-ring',
               dragging ? 'cursor-grabbing bg-primary/20' : 'cursor-grab',
             )}
             style={{
@@ -360,7 +364,7 @@ export function ScannerView({
         <>
           <div className="pt-safe absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
             <div className="flex flex-col items-start gap-1.5">
-              <span className="flex items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-xs text-white backdrop-blur">
+              <span className="flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-foreground shadow-sm backdrop-blur">
                 <span
                   className={cn(
                     'size-2 rounded-full',
@@ -378,12 +382,12 @@ export function ScannerView({
                       : 'Procurando o protocolo…'}
               </span>
               {source && !paused && (
-                <span className="rounded-full bg-black/65 px-3 py-1 text-[11px] text-white/80 backdrop-blur">
+                <span className="rounded-full bg-background/90 px-3 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
                   {SOURCE_LABEL[source]}
                 </span>
               )}
               {focusSupported && !paused && (
-                <span className="rounded-full bg-black/65 px-3 py-1 text-[11px] text-white/70 backdrop-blur">
+                <span className="rounded-full bg-background/90 px-3 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
                   toque na folha para focar
                 </span>
               )}
@@ -400,7 +404,7 @@ export function ScannerView({
           </div>
 
           {scannerError && (
-            <p className="absolute inset-x-4 top-24 rounded-lg border border-destructive/40 bg-destructive/15 p-3 text-sm text-destructive backdrop-blur">
+            <p className="absolute inset-x-4 top-24 rounded-lg border border-destructive/40 bg-card/95 p-3 text-sm text-destructive shadow-lg backdrop-blur">
               {scannerError}
             </p>
           )}
@@ -412,7 +416,7 @@ export function ScannerView({
             finishing a stack does not mean hunting for a second button on
             another screen.
           */}
-          <div className="pb-safe absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-transparent p-4">
+          <div className="pb-safe absolute inset-x-0 bottom-0 bg-linear-to-t from-background via-background/85 to-transparent p-4">
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="gap-1.5 py-1.5 text-sm">
                 <Check className="size-3.5" />
