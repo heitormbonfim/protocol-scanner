@@ -4,10 +4,14 @@
  * See `.env.example` for the full list. Vite only exposes variables prefixed
  * with `VITE_`, and inlines them at build time — so a production build carries
  * whatever was set when it was built, not when it runs.
+ *
+ * There is **one** URL here, not three: every call goes to the same service.
+ * What differs between them is the path and the method, and those live in
+ * `endpoints.ts` as code.
  */
 
 /**
- * Whether to intercept every request with Mock Service Worker.
+ * Whether the mock answers every request instead of the real service.
  *
  * Defaults to **on**: a fresh clone should run against mocks rather than
  * firing real submissions at a live service because someone forgot to create
@@ -16,55 +20,24 @@
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 
 /**
- * An endpoint as the app should actually call it.
+ * The API's base URL — scheme and host, no trailing slash, no path.
  *
- * While mocking, an **absolute** URL is reduced to its path so it resolves
- * against the app's own origin, where the dev server answers it.
+ * While mocking this is forced to `''`, which makes every call resolve against
+ * the app's own origin. That is where the mock is listening: the dev server
+ * itself in the browser, MSW under test.
  *
- * This exists because of a genuinely dangerous trap. The mock is served by the
- * dev server, not by anything inside the page, so it can only ever intercept
- * requests that reach the dev server. Point the app at
- * `https://real-service.example/protocolo` and turn mocking on, and the browser
- * sends that request straight past the dev server to the real host — mocking
- * silently does nothing and every submission is real. Switching
- * `VITE_USE_MOCK` back to `true` without also swapping the three URLs looks
- * exactly like it worked.
- *
- * Reducing to the path removes the trap: with mocking on, every call lands on
- * this origin. `request` in `api.ts` then refuses anything that still would
- * not, so a URL this cannot rewrite cannot escape either.
+ * The forcing is a safety property, not a convenience. A mock can only
+ * intercept a request that actually reaches it. Point the app at the real
+ * service, leave mocking on, and the browser would send genuine submissions to
+ * a live government service while the developer believes nothing is going out —
+ * and a submission cannot be taken back. Deriving the base from `USE_MOCK`
+ * makes that state unreachable instead of merely discouraged.
  */
-function endpoint(configured: string): string {
-  if (!USE_MOCK) return configured;
-  try {
-    // Throws for a relative path, which is already what we want.
-    const absolute = new URL(configured);
-    return `${absolute.pathname}${absolute.search}`;
-  } catch {
-    return configured;
-  }
-}
+export const API_URL = USE_MOCK
+  ? ""
+  : (import.meta.env.VITE_API_URL ?? "").trim().replace(/\/+$/, "");
 
-/** `GET {LOOKUP_URL}?protocoloId=<num>` → resolves a number to its id. */
-export const LOOKUP_URL = endpoint(
-  import.meta.env.VITE_LOOKUP_URL ?? "/api/protocols",
-);
-
-/** `PUT {PROTOCOL_URL}/<id>` → the ordinary protocol submission. */
-export const PROTOCOL_URL = endpoint(
-  import.meta.env.VITE_PROTOCOL_URL ?? "/api/protocols",
-);
-
-/**
- * `PUT {PROTOCOL_AS_URL}/<id>` → the AS submission.
- *
- * A separate service from the ordinary one, and never valid on its own: see
- * `runProtocolQueue` for the ordering rule that enforces it.
- */
-export const PROTOCOL_AS_URL = endpoint(
-  import.meta.env.VITE_PROTOCOL_AS_URL ?? "/api/protocols-as",
-);
-
+/** Per-request timeout. Applied to every call by `request` in `api.ts`. */
 export const REQUEST_TIMEOUT_MS = Number(
   import.meta.env.VITE_REQUEST_TIMEOUT_MS ?? 5_000,
 );

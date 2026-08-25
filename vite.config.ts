@@ -63,12 +63,10 @@ export default defineConfig(({ mode }) => {
       ...(useHttps && !cert ? [basicSsl()] : []),
       // Serves /dev-ca.crt so a phone can install the CA by visiting the URL.
       devCa(),
-      // Answers the three mock endpoints from the dev server itself.
+      // Answers the three mock endpoints from the dev server itself. The routes
+      // come from src/lib/endpoints.ts, the same table the client uses.
       mockApi({
         enabled: useMock,
-        lookupUrl: env.VITE_LOOKUP_URL ?? '/api/protocols',
-        protocolUrl: env.VITE_PROTOCOL_URL ?? '/api/protocols',
-        protocolAsUrl: env.VITE_PROTOCOL_AS_URL ?? '/api/protocols-as',
         // When a token is configured, the mock demands it — so a request that
         // forgets the header fails here rather than in production.
         token: env.VITE_AUTH_TOKEN?.trim(),
@@ -85,16 +83,15 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       ...(cert ? { https: cert } : {}),
 
-      // Once the real protocol API host is known, set VITE_USE_MOCK=false and
-      // uncomment this so browser requests to /api are proxied server-side and
-      // never hit CORS.
+      // To talk to the real service without hitting CORS: set
+      // VITE_USE_MOCK=false, leave VITE_API_URL empty so the app calls its own
+      // origin, and uncomment this to forward /protocolo server-side.
       //
       // proxy: {
-      //   '/api': {
-      //     target: 'https://the-real-host.example.gov.br',
+      //   '/protocolo': {
+      //     target: env.VITE_API_URL,
       //     changeOrigin: true,
       //     secure: false,
-      //     rewrite: (path) => path.replace(/^\/api/, ''),
       //   },
       // },
     },

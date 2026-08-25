@@ -1,5 +1,5 @@
 import { HttpResponse, http } from 'msw'
-import { LOOKUP_URL, PROTOCOL_AS_URL, PROTOCOL_URL } from '../lib/config'
+import { ENDPOINTS } from '../lib/endpoints'
 import {
   lookupReply,
   protocolAsReply,
@@ -47,21 +47,21 @@ async function protocoloIdOf(request: Request): Promise<string | null> {
 }
 
 // `http.all` rather than `http.get` throughout: the method for each call lives
-// in `src/lib/api.ts` and is expected to change, and the mock's job is to
+// in `src/lib/endpoints.ts` and is expected to change, and the mock's job is to
 // answer the route, not to police the verb.
 export const handlers = [
-  // {LOOKUP_URL}?protocoloId=<num> → { id }
-  http.all(LOOKUP_URL, async ({ request }) =>
+  // {lookup.path}?protocoloId=<num> → { id }
+  http.all(ENDPOINTS.lookup.path, async ({ request }) =>
     toResponse(lookupReply(await protocoloIdOf(request))),
   ),
 
-  // {PROTOCOL_URL}/<id>
-  http.all(`${PROTOCOL_URL}/:id`, ({ params }) =>
+  // {protocol.path}/<id>
+  http.all(`${ENDPOINTS.protocol.path}/:id`, ({ params }) =>
     toResponse(protocolReply(String(params.id))),
   ),
 
-  // {PROTOCOL_AS_URL}/<id>
-  http.all(`${PROTOCOL_AS_URL}/:id`, ({ params }) =>
+  // {protocolAs.path}/<id>
+  http.all(`${ENDPOINTS.protocolAs.path}/:id`, ({ params }) =>
     toResponse(protocolAsReply(String(params.id))),
   ),
 ]

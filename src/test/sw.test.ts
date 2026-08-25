@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 // tsconfig, which has no Node types, and Vite resolves the path at transform
 // time so a rename cannot leave the test silently pointing at nothing.
 import swSource from '../../public/sw.js?raw'
+import { ENDPOINTS } from '../lib/endpoints'
 
 /**
  * The service worker's caching rules.
@@ -95,9 +96,11 @@ function allWritten(worker: ReturnType<typeof loadServiceWorker>) {
 describe('service worker — what it refuses to cache', () => {
   it('ignores a protocol submission, which is a PUT', async () => {
     const worker = loadServiceWorker()
-    const handled = await send(worker, `${ORIGIN}/api/protocols/PRT-1`, {
-      method: 'PUT',
-    })
+    const handled = await send(
+      worker,
+      `${ORIGIN}${ENDPOINTS.protocol.path}/PRT-1`,
+      { method: 'PUT' },
+    )
 
     expect(handled).toBe(false)
     expect(allWritten(worker)).toEqual([])
@@ -105,9 +108,11 @@ describe('service worker — what it refuses to cache', () => {
 
   it('ignores the AS submission too', async () => {
     const worker = loadServiceWorker()
-    const handled = await send(worker, `${ORIGIN}/api/protocols-as/PRT-1`, {
-      method: 'PUT',
-    })
+    const handled = await send(
+      worker,
+      `${ORIGIN}${ENDPOINTS.protocolAs.path}/PRT-1`,
+      { method: 'PUT' },
+    )
 
     expect(handled).toBe(false)
     expect(allWritten(worker)).toEqual([])
@@ -118,7 +123,7 @@ describe('service worker — what it refuses to cache', () => {
     const worker = loadServiceWorker()
     const handled = await send(
       worker,
-      `${ORIGIN}/api/protocols?protocoloId=202601300217719`,
+      `${ORIGIN}${ENDPOINTS.lookup.path}?protocoloId=202601300217719`,
     )
 
     expect(handled).toBe(false)

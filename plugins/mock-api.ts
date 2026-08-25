@@ -6,6 +6,7 @@ import {
   protocolReply,
   type MockReply,
 } from '../src/mocks/scenario.ts'
+import { ENDPOINTS } from '../src/lib/endpoints.ts'
 
 /**
  * Serves the mock API from the dev server itself, instead of from a service
@@ -31,9 +32,6 @@ import {
 
 export type MockApiOptions = {
   enabled: boolean
-  lookupUrl: string
-  protocolUrl: string
-  protocolAsUrl: string
   /**
    * When set, every route demands `Authorization: Bearer <token>` and answers
    * 401 otherwise. Mirrors `VITE_AUTH_TOKEN`, so a token that never reaches the
@@ -99,7 +97,10 @@ async function readJsonBody(req: Req): Promise<Record<string, unknown>> {
   }
 }
 
-/** Trailing-slash-insensitive prefix, so `/api/protocols-as` never matches `/api/protocols`. */
+/**
+ * Trailing-slash-insensitive prefix, so `…/protocolaragendamentoas` never
+ * matches `…/protocolaragendamento`.
+ */
 function segmentAfter(pathname: string, base: string): string | null {
   const prefix = base.endsWith('/') ? base : `${base}/`
   if (!pathname.startsWith(prefix)) return null
@@ -107,32 +108,22 @@ function segmentAfter(pathname: string, base: string): string | null {
   return rest.length > 0 && !rest.includes('/') ? decodeURIComponent(rest) : null
 }
 
-/**
- * An endpoint as this middleware will see it: a path.
- *
- * The three URLs come straight from `.env`, where they are often absolute
- * (`https://real-service.example/protocolo`). The middleware only ever compares
- * against `req.url`, which is a path, so an absolute value would match nothing
- * and every request would fall through — mocking on, and yet real submissions
- * going out. `src/lib/config.ts` performs the matching rewrite on the client so
- * the two agree.
+/*
+ * The paths come from `src/lib/endpoints.ts`, the same table the client builds
+ * its URLs from, so the two cannot drift. They are bare paths, which is exactly
+ * what this middleware compares against `req.url` — and while mocking the
+ * client's base URL is forced to '' (see `API_URL` in src/lib/config.ts), so
+ * every call lands here rather than on a real host.
  */
-function toPath(url: string): string {
-  try {
-    return new URL(url).pathname
-  } catch {
-    return url
-  }
-}
 
 export function mockApi(options: MockApiOptions): Plugin {
   const { enabled, token } = options
-  const lookupUrl = toPath(options.lookupUrl)
-  const protocolUrl = toPath(options.protocolUrl)
-  const protocolAsUrl = toPath(options.protocolAsUrl)
+  const lookupUrl = ENDPOINTS.lookup.path
+  const protocolUrl = ENDPOINTS.protocol.path
+  const protocolAsUrl = ENDPOINTS.protocolAs.path
   const delayMs = options.delayMs ?? MOCK_DELAY_MS
 
-  // Deliberately method-agnostic: `src/lib/api.ts` picks a method per call, and
+  // Deliberately method-agnostic: `endpoints.ts` picks a method per call, and
   // the mock should keep answering when one of them changes to POST.
   const middleware: Connect.NextHandleFunction = (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://localhost')

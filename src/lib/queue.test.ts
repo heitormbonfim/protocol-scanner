@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PROTOCOL_AS_URL, PROTOCOL_URL } from './config'
+import { ENDPOINTS } from './endpoints'
 import { pendingRecords, recordOutcomes, runProtocolQueue } from './queue'
 import { server } from '../mocks/server'
 import type { ProtocolRecord } from '../types'
@@ -72,15 +72,15 @@ describe('runProtocolQueue — the AS rule', () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: false })])
 
-    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217719`)])
+    expect(calls).toEqual([endpoint(`${ENDPOINTS.protocol.path}/PRT-217719`)])
   })
 
   it('calls the ordinary protocol BEFORE AS, never the other way round', async () => {
     const calls = trackRequests()
     await runProtocolQueue([makeRecord({ withAs: true })])
 
-    const protocolAt = calls.indexOf(endpoint(`${PROTOCOL_URL}/PRT-217719`))
-    const asAt = calls.indexOf(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
+    const protocolAt = calls.indexOf(endpoint(`${ENDPOINTS.protocol.path}/PRT-217719`))
+    const asAt = calls.indexOf(endpoint(`${ENDPOINTS.protocolAs.path}/PRT-217719`))
     expect(protocolAt).toBeGreaterThanOrEqual(0)
     expect(asAt).toBeGreaterThan(protocolAt)
   })
@@ -88,14 +88,14 @@ describe('runProtocolQueue — the AS rule', () => {
   it('does NOT send AS when the ordinary protocol fails', async () => {
     // The core invariant: AS is an add-on, never valid on its own.
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${ENDPOINTS.protocol.path}/:id`, () =>
         HttpResponse.text('falhou', { status: 500 }),
       ),
     )
     const calls = trackRequests()
     const outcomes = await runProtocolQueue([makeRecord({ withAs: true })])
 
-    expect(calls).not.toContain(endpoint(`${PROTOCOL_AS_URL}/PRT-217719`))
+    expect(calls).not.toContain(endpoint(`${ENDPOINTS.protocolAs.path}/PRT-217719`))
 
     const as = outcomes.find((outcome) => outcome.kind === 'as')
     expect(as?.ok).toBe(false)
@@ -136,7 +136,7 @@ describe('runProtocolQueue — the AS rule', () => {
       makeRecord({ withAs: true, protocol: { status: 'success' } }),
     ])
 
-    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+    expect(calls).toEqual([endpoint(`${ENDPOINTS.protocolAs.path}/PRT-217719`)])
   })
 })
 
@@ -163,7 +163,7 @@ describe('never files the same protocol twice', () => {
       }),
     ])
 
-    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+    expect(calls).toEqual([endpoint(`${ENDPOINTS.protocolAs.path}/PRT-217719`)])
   })
 
   it('does not re-send a protocol left idle by an interrupted run', async () => {
@@ -172,7 +172,7 @@ describe('never files the same protocol twice', () => {
       makeRecord({ withAs: true, protocoled: true, protocol: { status: 'idle' } }),
     ])
 
-    expect(calls).toEqual([endpoint(`${PROTOCOL_AS_URL}/PRT-217719`)])
+    expect(calls).toEqual([endpoint(`${ENDPOINTS.protocolAs.path}/PRT-217719`)])
   })
 
   it('never re-sends an AS that already went out', async () => {
@@ -237,7 +237,7 @@ describe('records left out of the run', () => {
       makeRecord({ num: '202601300217703', id: 'PRT-217703', selected: false }),
     ])
 
-    expect(calls).toEqual([endpoint(`${PROTOCOL_URL}/PRT-217702`)])
+    expect(calls).toEqual([endpoint(`${ENDPOINTS.protocol.path}/PRT-217702`)])
   })
 })
 
@@ -246,7 +246,7 @@ describe('runProtocolQueue — sequencing', () => {
     let inFlight = 0
     let maxInFlight = 0
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, async () => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, async () => {
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         await new Promise((resolve) => setTimeout(resolve, 5))
@@ -283,7 +283,7 @@ describe('runProtocolQueue — sequencing', () => {
     const calls = trackRequests()
 
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, () => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, () => {
         controller.abort()
         return HttpResponse.json({ ok: true })
       }),

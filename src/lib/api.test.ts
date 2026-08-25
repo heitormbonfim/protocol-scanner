@@ -1,7 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { lookupProtocolId, protocolAsById, protocolById, readId } from './api'
-import { LOOKUP_URL, PROTOCOL_AS_URL, PROTOCOL_URL } from './config'
+import { ENDPOINTS } from './endpoints'
 import { server } from '../mocks/server'
 
 const NUM = '202601300217719'
@@ -10,9 +10,9 @@ const NUM = '202601300217719'
  * The absolute URL a configured endpoint resolves to, built exactly as
  * `resolveUrl` in `api.ts` builds it.
  *
- * Endpoints come from the environment and may be relative (`/api/protocols`)
- * or absolute (a real service). Comparing resolved URLs rather than bare
- * pathnames keeps these assertions true under either.
+ * The base URL is empty while mocking and absolute when it is off, so paths
+ * resolve differently depending on configuration. Comparing resolved URLs
+ * rather than bare pathnames keeps these assertions true under either.
  */
 function endpoint(path: string): string {
   return new URL(path, location.origin).href
@@ -49,7 +49,7 @@ describe('lookupProtocolId', () => {
   it('sends the number as ?protocoloId and returns the id', async () => {
     let seen: string | null = null
     server.use(
-      http.all(LOOKUP_URL, ({ request }) => {
+      http.all(ENDPOINTS.lookup.path, ({ request }) => {
         seen = new URL(request.url).searchParams.get('protocoloId')
         return HttpResponse.json({ id: 'PRT-1' })
       }),
@@ -62,7 +62,7 @@ describe('lookupProtocolId', () => {
 
   it('reports an HTTP failure with its status', async () => {
     server.use(
-      http.all(LOOKUP_URL, () => HttpResponse.json({}, { status: 503 })),
+      http.all(ENDPOINTS.lookup.path, () => HttpResponse.json({}, { status: 503 })),
     )
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
@@ -70,14 +70,14 @@ describe('lookupProtocolId', () => {
   })
 
   it('treats a 200 with no id as a failure rather than a success', async () => {
-    server.use(http.all(LOOKUP_URL, () => HttpResponse.json({ nada: true })))
+    server.use(http.all(ENDPOINTS.lookup.path, () => HttpResponse.json({ nada: true })))
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toMatch(/sem id/i)
   })
 
   it('reports a network error instead of throwing', async () => {
-    server.use(http.all(LOOKUP_URL, () => HttpResponse.error()))
+    server.use(http.all(ENDPOINTS.lookup.path, () => HttpResponse.error()))
     const result = await lookupProtocolId(NUM)
     expect(result.ok).toBe(false)
   })
@@ -95,47 +95,47 @@ describe('protocolById / protocolAsById', () => {
   it('appends the id as a path segment on the ordinary endpoint', async () => {
     let url: string | null = null
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, ({ request }) => {
         url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     const result = await protocolById('PRT-1')
-    expect(url).toBe(endpoint(`${PROTOCOL_URL}/PRT-1`))
+    expect(url).toBe(endpoint(`${ENDPOINTS.protocol.path}/PRT-1`))
     expect(result.ok).toBe(true)
   })
 
   it('uses the separate AS endpoint, not the ordinary one', async () => {
     let url: string | null = null
     server.use(
-      http.all(`${PROTOCOL_AS_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocolAs.path}/:id`, ({ request }) => {
         url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     await protocolAsById('PRT-1')
-    expect(url).toBe(endpoint(`${PROTOCOL_AS_URL}/PRT-1`))
-    expect(PROTOCOL_AS_URL).not.toBe(PROTOCOL_URL)
+    expect(url).toBe(endpoint(`${ENDPOINTS.protocolAs.path}/PRT-1`))
+    expect(ENDPOINTS.protocolAs.path).not.toBe(ENDPOINTS.protocol.path)
   })
 
   it('percent-encodes an id with awkward characters', async () => {
     let url: string | null = null
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, ({ request }) => {
         url = request.url
         return HttpResponse.json({ ok: true })
       }),
     )
 
     await protocolById('a/b c')
-    expect(url).toBe(endpoint(`${PROTOCOL_URL}/a%2Fb%20c`))
+    expect(url).toBe(endpoint(`${ENDPOINTS.protocol.path}/a%2Fb%20c`))
   })
 
   it("surfaces the service's own error text, which is more useful than a code", async () => {
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${ENDPOINTS.protocol.path}/:id`, () =>
         HttpResponse.text('Protocolo já processado', { status: 409 }),
       ),
     )
@@ -148,7 +148,7 @@ describe('protocolById / protocolAsById', () => {
 
   it('digs the message out of a JSON error envelope', async () => {
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${ENDPOINTS.protocol.path}/:id`, () =>
         HttpResponse.json({ message: 'Protocolo bloqueado' }, { status: 403 }),
       ),
     )
@@ -160,7 +160,7 @@ describe('protocolById / protocolAsById', () => {
   it('does not show the user a fragment of an HTML error page', async () => {
     // What a proxy or gateway returns when the real service is unreachable.
     server.use(
-      http.all(`${PROTOCOL_URL}/:id`, () =>
+      http.all(`${ENDPOINTS.protocol.path}/:id`, () =>
         HttpResponse.text('<!doctype html><title>502 Bad Gateway</title>', {
           status: 502,
         }),
@@ -179,7 +179,7 @@ describe('protocolById / protocolAsById', () => {
 
 describe('HTTP methods', () => {
   /**
-   * The verb for each call is a constant at the top of `api.ts`. Production
+   * The verb for each call lives in `endpoints.ts`. Production
    * answers the lookup on GET and both submissions on PUT, so that is pinned
    * here: every other handler in this file is `http.all` and would happily
    * answer the wrong verb, which is how a change to those constants could
@@ -188,15 +188,15 @@ describe('HTTP methods', () => {
   it('sends GET for the lookup and PUT for both submissions', async () => {
     const seen: Record<string, string> = {}
     server.use(
-      http.all(LOOKUP_URL, ({ request }) => {
+      http.all(ENDPOINTS.lookup.path, ({ request }) => {
         seen.lookup = request.method
         return HttpResponse.json({ id: 'PRT-1' })
       }),
-      http.all(`${PROTOCOL_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, ({ request }) => {
         seen.protocol = request.method
         return HttpResponse.json({ ok: true })
       }),
-      http.all(`${PROTOCOL_AS_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocolAs.path}/:id`, ({ request }) => {
         seen.as = request.method
         return HttpResponse.json({ ok: true })
       }),
@@ -212,7 +212,7 @@ describe('HTTP methods', () => {
   it('sends no request body on a GET, which cannot carry one', async () => {
     let hadBody: boolean | null = null
     server.use(
-      http.all(LOOKUP_URL, ({ request }) => {
+      http.all(ENDPOINTS.lookup.path, ({ request }) => {
         hadBody = request.body !== null
         return HttpResponse.json({ id: 'PRT-1' })
       }),
@@ -272,7 +272,7 @@ describe('without AbortSignal.any / AbortSignal.timeout', () => {
     try {
       const controller = new AbortController()
       server.use(
-        http.all(LOOKUP_URL, async () => {
+        http.all(ENDPOINTS.lookup.path, async () => {
           controller.abort()
           await new Promise((resolve) => setTimeout(resolve, 10))
           return HttpResponse.json({ id: 'PRT-1' })
@@ -290,7 +290,7 @@ describe('without AbortSignal.any / AbortSignal.timeout', () => {
   it('still succeeds when nothing aborts', async () => {
     const restore = withoutStatics(['any', 'timeout'])
     try {
-      server.use(http.all(LOOKUP_URL, () => HttpResponse.json({ id: 'PRT-1' })))
+      server.use(http.all(ENDPOINTS.lookup.path, () => HttpResponse.json({ id: 'PRT-1' })))
 
       const controller = new AbortController()
       const result = await lookupProtocolId(NUM, controller.signal)
@@ -312,7 +312,7 @@ describe('without AbortSignal.any / AbortSignal.timeout', () => {
       const api = await import('./api')
 
       server.use(
-        http.all(LOOKUP_URL, async () => {
+        http.all(ENDPOINTS.lookup.path, async () => {
           await new Promise((resolve) => setTimeout(resolve, 200))
           return HttpResponse.json({ id: 'PRT-1' })
         }),
@@ -341,7 +341,7 @@ describe('without AbortSignal.any / AbortSignal.timeout', () => {
       const api = await import('./api')
 
       server.use(
-        http.all(LOOKUP_URL, async () => {
+        http.all(ENDPOINTS.lookup.path, async () => {
           await new Promise((resolve) => setTimeout(resolve, 200))
           return HttpResponse.json({ id: 'PRT-1' })
         }),
@@ -386,9 +386,9 @@ describe('bearer token', () => {
       return HttpResponse.json({ id: 'PRT-1' })
     }
     server.use(
-      http.all(LOOKUP_URL, record),
-      http.all(`${PROTOCOL_URL}/:id`, record),
-      http.all(`${PROTOCOL_AS_URL}/:id`, record),
+      http.all(ENDPOINTS.lookup.path, record),
+      http.all(`${ENDPOINTS.protocol.path}/:id`, record),
+      http.all(`${ENDPOINTS.protocolAs.path}/:id`, record),
     )
 
     await api.lookupProtocolId(NUM)
@@ -432,17 +432,23 @@ describe('mock safety', () => {
    * The trap this guards against.
    *
    * The mock is served by the dev server, so it can only intercept requests
-   * that reach the dev server. Configure an absolute URL to the real service
-   * and turn mocking on, and the browser goes straight past the dev server to
-   * the real host: mocking appears to be on, and every submission is a real
-   * protocol filed against a live government service. There is no undo.
+   * that reach the dev server. Point the app at the real service and turn
+   * mocking on, and the browser goes straight past the dev server to the real
+   * host: mocking appears to be on, and every submission is a real protocol
+   * filed against a live government service. There is no undo.
    *
-   * So there are two independent defences, and both are asserted here: absolute
-   * endpoints are rewritten to this origin, and anything that would still leave
-   * this origin is refused before `fetch` is reached.
+   * So there are two independent defences, and both are asserted here.
+   *
+   *   1. `API_URL` is *derived* from `USE_MOCK` rather than merely defaulted —
+   *      while mocking it is '', so no value of VITE_API_URL can point a call
+   *      off-origin. That makes the dangerous state unreachable by
+   *      configuration, which is where it used to come from.
+   *   2. `request` still refuses anything that would leave this origin, which
+   *      now covers the remaining route in: a bad path in `endpoints.ts`.
    */
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.doUnmock('./endpoints')
     vi.resetModules()
   })
 
@@ -452,25 +458,34 @@ describe('mock safety', () => {
     return { api: await import('./api'), config: await import('./config') }
   }
 
-  const REAL = 'https://real-service.example/protocolo/protocolar'
+  const REAL = 'https://real-service.example'
 
-  it('rewrites an absolute endpoint to this origin while mocking', async () => {
+  it('ignores the configured base entirely while mocking', async () => {
     const { config } = await configuredWith({
       VITE_USE_MOCK: 'true',
-      VITE_PROTOCOL_URL: REAL,
+      VITE_API_URL: REAL,
     })
 
-    expect(config.PROTOCOL_URL).toBe('/protocolo/protocolar')
+    expect(config.API_URL).toBe('')
   })
 
-  it('leaves an absolute endpoint alone when mocking is off', async () => {
+  it('uses the configured base when mocking is off', async () => {
     // The whole point of turning mocking off — this must keep working.
     const { config } = await configuredWith({
       VITE_USE_MOCK: 'false',
-      VITE_PROTOCOL_URL: REAL,
+      VITE_API_URL: REAL,
     })
 
-    expect(config.PROTOCOL_URL).toBe(REAL)
+    expect(config.API_URL).toBe(REAL)
+  })
+
+  it('strips a trailing slash so the path is never doubled', async () => {
+    const { config } = await configuredWith({
+      VITE_USE_MOCK: 'false',
+      VITE_API_URL: `${REAL}/`,
+    })
+
+    expect(config.API_URL).toBe(REAL)
   })
 
   it('does send the real cross-origin request when mocking is off', async () => {
@@ -478,12 +493,12 @@ describe('mock safety', () => {
     // real service, or the safety net has quietly broken production.
     const { api } = await configuredWith({
       VITE_USE_MOCK: 'false',
-      VITE_PROTOCOL_URL: REAL,
+      VITE_API_URL: REAL,
     })
 
     let seen: string | null = null
     server.use(
-      http.all(`${REAL}/:id`, ({ request }) => {
+      http.all(`${REAL}${ENDPOINTS.protocol.path}/:id`, ({ request }) => {
         seen = request.url
         return HttpResponse.json({ ok: true })
       }),
@@ -492,18 +507,18 @@ describe('mock safety', () => {
     const result = await api.protocolById('PRT-1')
 
     expect(result.ok).toBe(true)
-    expect(seen).toBe(`${REAL}/PRT-1`)
+    expect(seen).toBe(`${REAL}${ENDPOINTS.protocol.path}/PRT-1`)
   })
 
   it('submits to this origin rather than the real host while mocking', async () => {
-    const { api, config } = await configuredWith({
+    const { api } = await configuredWith({
       VITE_USE_MOCK: 'true',
-      VITE_PROTOCOL_URL: REAL,
+      VITE_API_URL: REAL,
     })
 
     let seen: string | null = null
     server.use(
-      http.all(`${config.PROTOCOL_URL}/:id`, ({ request }) => {
+      http.all(`${ENDPOINTS.protocol.path}/:id`, ({ request }) => {
         seen = request.url
         return HttpResponse.json({ ok: true })
       }),
@@ -512,18 +527,34 @@ describe('mock safety', () => {
     const result = await api.protocolById('PRT-1')
 
     expect(result.ok).toBe(true)
-    expect(seen).toBe(endpoint('/protocolo/protocolar/PRT-1'))
+    expect(seen).toBe(endpoint(`${ENDPOINTS.protocol.path}/PRT-1`))
     expect(seen).not.toContain('real-service.example')
   })
 
+  /**
+   * Force a bad path into the endpoint table.
+   *
+   * Now that the base is derived from `USE_MOCK`, configuration can no longer
+   * send a call off-origin — so the only remaining way in is a mistake in
+   * `endpoints.ts` itself. A protocol-relative path is the realistic slip: it
+   * looks like a path, but `new URL` resolves it against the page's scheme and
+   * lands on another host.
+   */
+  async function withEndpointPath(path: string) {
+    vi.stubEnv('VITE_USE_MOCK', 'true')
+    vi.resetModules()
+    vi.doMock('./endpoints', () => ({
+      ENDPOINTS: {
+        lookup: { method: 'GET', path },
+        protocol: { method: 'PUT', path },
+        protocolAs: { method: 'PUT', path },
+      },
+    }))
+    return await import('./api')
+  }
+
   it('refuses a request that would still leave this origin, and sends nothing', async () => {
-    // A protocol-relative URL cannot be parsed on its own, so the rewrite above
-    // leaves it untouched — yet it resolves cross-origin. Exactly the case the
-    // second defence exists for.
-    const { api } = await configuredWith({
-      VITE_USE_MOCK: 'true',
-      VITE_PROTOCOL_URL: '//real-service.example/protocolo',
-    })
+    const api = await withEndpointPath('//real-service.example/protocolo')
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const result = await api.protocolById('PRT-1')
@@ -535,10 +566,7 @@ describe('mock safety', () => {
   })
 
   it('still refuses the AS submission, which is the one with no undo', async () => {
-    const { api } = await configuredWith({
-      VITE_USE_MOCK: 'true',
-      VITE_PROTOCOL_AS_URL: '//real-service.example/protocolo-as',
-    })
+    const api = await withEndpointPath('//real-service.example/protocolo-as')
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const result = await api.protocolAsById('PRT-1')
@@ -554,12 +582,12 @@ describe('mock safety', () => {
 
 describe('mock handlers', () => {
   /**
-   * The method for each call is a constant in `api.ts` that is expected to
+   * The method for each call lives in `endpoints.ts` and is expected to
    * change once the real service is pinned down. These guard the claim that
    * changing it is all you have to do: the mocks must not be GET-only.
    */
   it('answers a lookup sent as a POST with a body', async () => {
-    const response = await fetch(new URL(LOOKUP_URL, location.origin), {
+    const response = await fetch(new URL(ENDPOINTS.lookup.path, location.origin), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ protocoloId: NUM }),
@@ -571,7 +599,7 @@ describe('mock handlers', () => {
 
   it('answers a submission sent as a POST', async () => {
     const response = await fetch(
-      new URL(`${PROTOCOL_URL}/PRT-217719`, location.origin),
+      new URL(`${ENDPOINTS.protocol.path}/PRT-217719`, location.origin),
       { method: 'POST' },
     )
     expect(response.status).toBe(200)

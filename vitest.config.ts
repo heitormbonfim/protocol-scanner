@@ -26,18 +26,16 @@ export default defineConfig({
      * The suite's own environment, fixed here rather than read from `.env`.
      *
      * Vite loads `.env` under test too, so without this the tests run against
-     * whatever endpoints and token the developer happens to have configured —
-     * a suite that passes on a fresh clone and fails for whoever is pointed at
+     * whatever host and token the developer happens to have configured — a
+     * suite that passes on a fresh clone and fails for whoever is pointed at
      * production. These values take precedence over any `.env` file.
      *
-     * Relative endpoints on purpose: every request is answered by MSW, and no
-     * real token belongs in a test run.
+     * An empty base URL on purpose: every request is answered by MSW on the
+     * app's own origin, and no real token belongs in a test run.
      */
     env: {
       VITE_USE_MOCK: 'true',
-      VITE_LOOKUP_URL: '/api/protocols',
-      VITE_PROTOCOL_URL: '/api/protocols',
-      VITE_PROTOCOL_AS_URL: '/api/protocols-as',
+      VITE_API_URL: '',
       VITE_AUTH_TOKEN: '',
       VITE_REQUEST_TIMEOUT_MS: '5000',
     },

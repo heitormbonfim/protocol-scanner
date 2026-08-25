@@ -12,17 +12,18 @@ Built for working through a physical pile: *point, confirm, next.*
 ![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-4-06b6d4?logo=tailwindcss&logoColor=white)
 ![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8?logo=pwa&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-236%20passing-3fb950)
+![Tests](https://img.shields.io/badge/tests-239%20passing-3fb950)
 
 </div>
 
 ---
 
-> **Three guarantees the code is built around**
+> **Four guarantees the code is built around**
 >
 > | | |
 > | --- | --- |
 > | 🔒 **AS is never alone** | The AS submission only ever follows a successful ordinary protocol — [details](#the-as-rule) |
+> | 🆔 **Nothing goes out without its id** | A run waits for the confirm-time lookups instead of failing the slips still resolving — [details](#nothing-is-submitted-without-its-id) |
 > | 🔁 **Nothing is filed twice** | A filed protocol is remembered in a sticky flag, so no rerun, reload or abort can resend it — [details](#nothing-is-ever-filed-twice) |
 > | 🧪 **Mocking is all-or-nothing** | With mocks on, nothing can reach a real service — [details](#mocking-cannot-be-half-on) |
 
@@ -58,7 +59,7 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
                         CONFIRM SHEET  (photo + digits side by side)
                                │  ✓ Confirmar   [x] Protocolar também AS
                                ▼
-              GET {LOOKUP_URL}?protocoloId=<num>  →  { id }
+            GET {API_URL}/protocolo?protocoloId=<num>  →  { id }
                     (in the background — scanning never waits)
                                ▼
                     saved to history { id, num }
@@ -68,9 +69,13 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
                  "Protocolar n" — from the scanner or the dashboard;
                   either way the camera closes before anything is sent
                                │
+                     any lookup still on the wire is waited for
+                       (a slip scanned a second ago has no id yet)
+                               │
                                ▼
-              one at a time:  PUT {PROTOCOL_URL}/<id>
-                              PUT {PROTOCOL_AS_URL}/<id>   ← only if AS was
+     one at a time:  PUT {API_URL}/protocolo/protocolaragendamento/<id>
+                     PUT {API_URL}/protocolo/protocolaragendamentoas/<id>
+                                                           ← only if AS was
                                                               ticked AND the
                                                               call above worked
                                ▼
@@ -95,6 +100,29 @@ to ask for it:
 This is enforced in one place, [`runRecord` in src/lib/queue.ts](src/lib/queue.ts),
 and is covered by tests that assert the AS endpoint is never contacted when the
 ordinary one fails.
+
+### Nothing is submitted without its id
+
+The confirm-time lookup runs in the background so scanning never waits on a
+round trip. That leaves a window where a slip is in the history but its id has
+not arrived — and "Protocolar" straight from the scanner lands in the middle of
+it, because that is how a stack is meant to be finished.
+
+A record with no id is reported as **Sem ID** rather than submitted, which is
+right, but here it was reporting a failure for records that were perfectly
+fine. So a run now waits for outstanding lookups before sending anything:
+
+- Lookups in flight are awaited — at most one request timeout, and only when
+  something is actually outstanding.
+- A record left `pending` with nothing in flight is asked for again. That is
+  the state a tab closed mid-lookup comes back in.
+- A lookup that genuinely fails still reports **Sem ID**, and no submission
+  goes out for it. The wait resolves ids; it does not paper over a failure.
+
+`Parar` works during the wait, and the run stops before the first request.
+
+Covered by [src/App.test.tsx](src/App.test.tsx), which holds a lookup open and
+asserts the submission does not overtake it.
 
 ### Nothing is ever filed twice
 
@@ -500,15 +528,34 @@ changing any of them.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VITE_USE_MOCK` | `true` | Serve the mock API from the dev server |
-| `VITE_LOOKUP_URL` | `/api/protocols` | `?protocoloId=<num>` → `{ id }` |
-| `VITE_PROTOCOL_URL` | `/api/protocols` | `/<id>` — ordinary protocol |
-| `VITE_PROTOCOL_AS_URL` | `/api/protocols-as` | `/<id>` — AS protocol |
+| `VITE_API_URL` | *(empty)* | Base URL of the service — scheme and host only |
 | `VITE_AUTH_TOKEN` | *(empty)* | Sent as `Authorization: Bearer <token>` |
 | `VITE_REQUEST_TIMEOUT_MS` | `5000` | Per-request timeout |
 
-All three URLs are independent. Relative paths resolve against the app's own
-origin (what you want when routing through the Vite dev proxy); absolute
-`https://` URLs work too if the service sends CORS headers.
+### One URL, and where the paths live
+
+`VITE_API_URL` is a **base**: scheme and host, no trailing slash, no path. Every
+call goes to the same service, so there is one variable rather than three.
+
+The paths and methods are not configuration — they are the shape of the
+service's contract, so they live in code, in
+[src/lib/endpoints.ts](src/lib/endpoints.ts):
+
+```
+GET {VITE_API_URL}/protocolo?protocoloId=<15 digits>   ->  { "id": "..." }
+PUT {VITE_API_URL}/protocolo/protocolaragendamento/<id>
+PUT {VITE_API_URL}/protocolo/protocolaragendamentoas/<id>
+```
+
+That table is imported by all three consumers — the client
+([src/lib/api.ts](src/lib/api.ts)), the dev-server mock
+([plugins/mock-api.ts](plugins/mock-api.ts)) and the test mock
+([src/mocks/handlers.ts](src/mocks/handlers.ts)) — so they cannot disagree about
+where a call goes, and changing a route is one edit reviewed in one diff.
+
+Leave `VITE_API_URL` **empty** to call the app's own origin, which is what you
+want when routing through the Vite dev proxy. An absolute `https://` URL works
+too if the service sends CORS headers.
 
 ### Auth
 
@@ -561,11 +608,11 @@ protocols, and it was completely silent. It is worth understanding, because the
 configuration that causes it is the obvious one.
 
 The mock is served by the **dev server**, so it can only intercept requests that
-reach the dev server. Leave the three URLs pointing at the real service —
+reach the dev server. Leave the base URL pointing at the real service —
 
 ```dotenv
 VITE_USE_MOCK=true
-VITE_PROTOCOL_URL=https://real-service.example/protocolo/protocolar
+VITE_API_URL=https://real-service.example
 ```
 
 — and the browser sends that request straight past the dev server to the real
@@ -574,11 +621,12 @@ undo.
 
 Two independent defences now prevent it:
 
-1. **Absolute endpoints are rewritten to their path while mocking**
-   ([src/lib/config.ts](src/lib/config.ts)), so every call lands on this origin
-   where the dev server answers it. The middleware normalises the same way
-   ([plugins/mock-api.ts](plugins/mock-api.ts)), so the two always agree. You can
-   flip `VITE_USE_MOCK` on and off without touching the URLs.
+1. **The base URL is derived from `USE_MOCK`, not merely defaulted**
+   ([src/lib/config.ts](src/lib/config.ts)): while mocking it is `''`, so every
+   call resolves against this origin where the dev server answers it. No value
+   of `VITE_API_URL` can override that, which makes the dangerous state
+   unreachable by configuration rather than just discouraged. You can flip
+   `VITE_USE_MOCK` on and off without touching the URL.
 2. **Anything that would still leave this origin is refused**
    ([src/lib/api.ts](src/lib/api.ts)) — before `fetch`, so nothing goes out. It
    surfaces as an ordinary failure reading *"Bloqueado: VITE_USE_MOCK está
@@ -656,19 +704,21 @@ production build.
 
 ## Wiring up the real API
 
-1. Set `VITE_USE_MOCK=false`, the three URLs and `VITE_AUTH_TOKEN` in
+1. Set `VITE_USE_MOCK=false`, `VITE_API_URL` and `VITE_AUTH_TOKEN` in
    `.env.local`.
 2. Uncomment the `server.proxy` block in [vite.config.ts](vite.config.ts) and
-   point `target` at the real host. Proxying server-side avoids CORS.
+   point `target` at the real host. Proxying server-side avoids CORS — in which
+   case leave `VITE_API_URL` empty so the app calls its own origin.
 
-Two things to check against the real service, both marked in
-[src/lib/api.ts](src/lib/api.ts):
+Two things to check against the real service:
 
-- **The ID field.** `readId` currently accepts `id`, `Id`, `ID`, `protocolId`,
-  `idProtocolo`, or a bare string/number body. Narrow it once the real shape is
-  known.
-- **The methods.** The lookup is `GET`, both submissions are `PUT`; see
-  [Methods](#methods) for switching one and giving it a body.
+- **The ID field.** `readId` in [src/lib/api.ts](src/lib/api.ts) currently
+  accepts `id`, `Id`, `ID`, `protocolId`, `idProtocolo`, or a bare
+  string/number body. Narrow it once the real shape is known.
+- **The routes.** Paths and methods are in
+  [src/lib/endpoints.ts](src/lib/endpoints.ts) — the lookup is `GET`, both
+  submissions are `PUT`; see [Methods](#methods) for switching one and giving it
+  a body.
 
 The bearer token needs nothing beyond the variable — it is attached to all three
 requests already.
@@ -727,7 +777,7 @@ pnpm dev
 government service.** Confirm it is on: the three endpoints answer as JSON.
 
 ```bash
-curl -k "https://localhost:5173/api/protocols?protocoloId=202601300217719"
+curl -k "https://localhost:5173/protocolo?protocoloId=202601300217719"
 # {"id":"PRT-217719"}
 ```
 
@@ -815,7 +865,7 @@ Worth walking once before a release. Against mocks, on a phone:
 
 Only after the mock run is clean.
 
-1. Set `VITE_USE_MOCK=false`, the three URLs and `VITE_AUTH_TOKEN` in
+1. Set `VITE_USE_MOCK=false`, `VITE_API_URL` and `VITE_AUTH_TOKEN` in
    `.env.local`.
 2. Start with **one** number you are willing to submit for real. There is no
    undo, and the AS rule means a successful protocol cannot be taken back.
@@ -828,16 +878,19 @@ Tests live next to what they cover, as `*.test.ts` / `*.test.tsx`. Two
 conventions matter, and both exist because of bugs this project actually hit:
 
 - **Register handlers with `http.all`, not `http.get`.** The verb for each call
-  is a constant that changes; a handler pinned to `GET` silently stops matching
-  and the request falls through to the default mock, which usually answers `200`
-  — so the test keeps passing while asserting nothing. Pin verbs only in the
-  dedicated **HTTP methods** block in `api.test.ts`.
-- **Compare resolved URLs, not pathnames.** Endpoints may be configured as
-  relative (`/api/protocols`) or absolute (`https://real.example/protocolo`).
-  Both test files define an `endpoint()` helper that resolves a configured path
-  the same way `api.ts` does; use it. And prefer an exact match over
-  `startsWith` — the AS endpoint's path usually *begins with* the ordinary one's
-  (`…/protocols` and `…/protocols-as`), so a prefix test cannot tell them apart.
+  lives in [src/lib/endpoints.ts](src/lib/endpoints.ts) and changes; a handler
+  pinned to `GET` silently stops matching and the request falls through to the
+  default mock, which usually answers `200` — so the test keeps passing while
+  asserting nothing. Pin verbs only in the dedicated **HTTP methods** block in
+  `api.test.ts`.
+- **Route from `ENDPOINTS`, never a hand-written path.** A literal in a test
+  drifts the moment a route changes, and drifts silently for the reason above.
+- **Compare resolved URLs, not pathnames.** With mocking off the base is
+  absolute, with it on the base is empty. Both test files define an `endpoint()`
+  helper that resolves a path the same way `api.ts` does; use it. And prefer an
+  exact match over `startsWith` — the AS path *begins with* the ordinary one's
+  (`…/protocolaragendamento` and `…/protocolaragendamentoas`), so a prefix test
+  cannot tell them apart.
 
 ---
 
@@ -948,7 +1001,8 @@ src/
     api.ts           the three backend calls (GET lookup, PUT submissions)
     queue.ts         sequential run + the AS rule
     storage.ts       localStorage history + migration
-    config.ts        env-driven URLs
+    config.ts        env-driven settings (base URL, token, timeout)
+    endpoints.ts     the route table: path + method per call
   hooks/
     useCamera.ts     getUserMedia, torch, tap-to-focus, teardown
     useScanner.ts    the scan loop
@@ -1087,23 +1141,24 @@ less creased slip help more than any setting.
 
 **The mock endpoints 404 / everything fails with "sem ID".** The middleware
 only registers when mocking is on and the paths match. Check `VITE_USE_MOCK`
-is not `false`, that the three URLs match what `plugins/mock-api.ts` was given,
-and restart the dev server — `vite.config.ts` reads the env at startup, so
+is not `false`, and restart the dev server — `vite.config.ts` reads the env at startup, so
 changes there need a restart, not just a reload.
 
 **Everything fails with "Bloqueado: VITE_USE_MOCK está ligado…".** Working as
-intended, and it just stopped a real submission. Mocking is on while an endpoint
-points at another origin. Point the three URLs at relative paths, or set
-`VITE_USE_MOCK=false` if you actually meant to submit for real. See [Mocking
-cannot be half-on](#mocking-cannot-be-half-on).
+intended, and it just stopped a real submission. Mocking is on while a call
+still resolves off-origin — which configuration can no longer cause, so the
+cause is a bad `path` in [src/lib/endpoints.ts](src/lib/endpoints.ts): a
+protocol-relative `//host/x` looks like a path but resolves to another host.
+See [Mocking cannot be half-on](#mocking-cannot-be-half-on).
 
 **Mocking is on but real protocols were filed.** Fixed — that combination is now
-refused rather than sent. If you are on an older build, the cause is absolute
-URLs in `.env`: they bypass the dev server entirely, so the mock never sees the
+unreachable: while mocking, the base URL is forced to the app's own origin
+whatever `.env` says. If you are on an older build, the cause is absolute URLs
+in `.env`, which bypass the dev server entirely so the mock never sees the
 request. Restart the dev server after updating.
 
 **Against a real host, everything fails with "sem ID".** The lookup endpoint is
-unreachable. Check `VITE_LOOKUP_URL` and that the proxy in `vite.config.ts` is
+unreachable. Check `VITE_API_URL` and that the proxy in `vite.config.ts` is
 uncommented and pointed at the right target.
 
 **The tests fail after I changed an HTTP method.** Expected — update the **HTTP

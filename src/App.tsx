@@ -56,15 +56,32 @@ export default function App() {
 
   const camera = useCamera()
   const abortRef = useRef<AbortController | null>(null)
-  /** Numbers with a lookup already in flight, so retries never double-fire. */
-  const inFlightRef = useRef(new Set<string>())
+  /**
+   * Lookups in flight, by number, so retries never double-fire — and so a run
+   * can wait for them. See `settleLookups`.
+   */
+  const inFlightRef = useRef(new Map<string, Promise<void>>())
 
-  // Mirror of `records` for handlers that need the latest value without
-  // becoming dependencies of every callback.
+  /**
+   * `records` as they are *now*, for handlers that need the latest value
+   * without becoming dependencies of every callback.
+   *
+   * Written synchronously by `commitRecords` rather than mirrored from an
+   * effect. An effect mirror is one render behind, which is invisible until a
+   * handler awaits something and then reads it — exactly what the protocol run
+   * does after waiting for lookups.
+   */
   const recordsRef = useRef(records)
-  useEffect(() => {
-    recordsRef.current = records
-  })
+
+  /** The single writer for `records`: keeps state and ref in step. */
+  const commitRecords = useCallback(
+    (update: (records: ProtocolRecord[]) => ProtocolRecord[]) => {
+      const next = update(recordsRef.current)
+      recordsRef.current = next
+      setRecords(next)
+    },
+    [],
+  )
 
   useEffect(() => saveRecords(records), [records])
   useEffect(() => saveFieldRoi(fieldRoi), [fieldRoi])
@@ -79,43 +96,82 @@ export default function App() {
 
   const updateRecord = useCallback(
     (num: string, patch: (record: ProtocolRecord) => ProtocolRecord) => {
-      setRecords((current) =>
+      commitRecords((current) =>
         current.map((record) => (record.num === num ? patch(record) : record)),
       )
     },
-    [],
+    [commitRecords],
   )
 
   // ── Confirm-time lookup ───────────────────────────────────────────────────
   // Runs in the background: the record is already stored, so the user moves on
   // to the next page immediately instead of waiting on a round trip per slip.
   const runLookup = useCallback(
-    async (num: string) => {
-      if (inFlightRef.current.has(num)) return
-      inFlightRef.current.add(num)
+    (num: string): Promise<void> => {
+      const existing = inFlightRef.current.get(num)
+      if (existing) return existing
 
-      updateRecord(num, (record) => ({ ...record, lookup: { status: 'pending' } }))
-
-      const result = await lookupProtocolId(num)
-      inFlightRef.current.delete(num)
-
-      if (result.ok) {
+      const attempt = (async () => {
         updateRecord(num, (record) => ({
           ...record,
-          id: result.id,
-          lookup: { status: 'ok' },
+          lookup: { status: 'pending' },
         }))
-      } else {
-        updateRecord(num, (record) => ({
-          ...record,
-          id: null,
-          lookup: { status: 'failed', reason: result.reason },
-        }))
-        flash(`Sem ID para ${num} — ${result.reason}`)
-      }
+
+        const result = await lookupProtocolId(num)
+
+        if (result.ok) {
+          updateRecord(num, (record) => ({
+            ...record,
+            id: result.id,
+            lookup: { status: 'ok' },
+          }))
+        } else {
+          updateRecord(num, (record) => ({
+            ...record,
+            id: null,
+            lookup: { status: 'failed', reason: result.reason },
+          }))
+          flash(`Sem ID para ${num} — ${result.reason}`)
+        }
+      })()
+
+      // Swallowed and always cleared: callers fire this with `void`, and a
+      // lookup left in the map would stall every later run for its full
+      // timeout.
+      const tracked = attempt
+        .catch(() => undefined)
+        .finally(() => {
+          inFlightRef.current.delete(num)
+        })
+
+      inFlightRef.current.set(num, tracked)
+      return tracked
     },
     [flash, updateRecord],
   )
+
+  /**
+   * Every id asked for, and nothing left on the wire.
+   *
+   * A record with no id is reported as "Sem ID" rather than submitted, so a run
+   * must not start while a lookup is still out. That is the ordinary case, not
+   * an edge one: "Protocolar" straight from the scanner is how a stack is
+   * meant to be finished, and the slip confirmed a second ago is still being
+   * looked up.
+   */
+  const settleLookups = useCallback(async () => {
+    // A record can sit `pending` with nothing in flight — the tab was closed
+    // mid-lookup and this state came back from storage. Ask again, or it would
+    // report "Sem ID" forever.
+    for (const record of recordsRef.current) {
+      if (!record.id && record.lookup.status === 'pending') void runLookup(record.num)
+    }
+
+    // A loop, because the sweep above may have started new ones.
+    while (inFlightRef.current.size > 0) {
+      await Promise.allSettled([...inFlightRef.current.values()])
+    }
+  }, [runLookup])
 
   const handleCandidate = useCallback((found: ScanCandidate) => {
     navigator.vibrate?.(60)
@@ -149,7 +205,7 @@ export default function App() {
 
   const handleConfirm = useCallback(
     (num: string, withAs: boolean, edited: boolean) => {
-      setRecords((current) => [
+      commitRecords((current) => [
         {
           num,
           id: null,
@@ -176,13 +232,13 @@ export default function App() {
       setCandidate(null)
       void runLookup(num)
     },
-    [candidate, runLookup],
+    [candidate, commitRecords, runLookup],
   )
 
   // ── History editing ───────────────────────────────────────────────────────
   const handleSaveEdit = useCallback(
     (originalNum: string, nextNum: string) => {
-      setRecords((current) =>
+      commitRecords((current) =>
         current.map((record) =>
           record.num === originalNum
             ? {
@@ -208,7 +264,7 @@ export default function App() {
       setEditingNum(null)
       void runLookup(nextNum)
     },
-    [runLookup],
+    [commitRecords, runLookup],
   )
 
   const handleToggleAs = useCallback(
@@ -234,30 +290,69 @@ export default function App() {
     [updateRecord],
   )
 
-  const handleSelectAll = useCallback((selected: boolean) => {
-    setRecords((current) => current.map((record) => ({ ...record, selected })))
-  }, [])
+  const handleSelectAll = useCallback(
+    (selected: boolean) => {
+      commitRecords((current) =>
+        current.map((record) => ({ ...record, selected })),
+      )
+    },
+    [commitRecords],
+  )
 
   const handleClearHistory = useCallback(() => {
     clearRecords()
-    setRecords([])
+    commitRecords(() => [])
     setProgress(null)
     setView('dashboard')
-  }, [])
+  }, [commitRecords])
 
   // ── Protocol run ──────────────────────────────────────────────────────────
   const runQueue = useCallback(
-    async (batch: ProtocolRecord[]) => {
+    async (requested: ProtocolRecord[]) => {
       const controller = new AbortController()
       abortRef.current = controller
       setRunning(true)
+
+      /*
+       * Resolve the ids first.
+       *
+       * Without this, finishing a stack from the scanner failed the slips that
+       * had just been scanned: their lookups were still on the wire, so they
+       * had no id yet and `runRecord` reported "Sem ID — busca não concluída"
+       * for a record that was perfectly fine. Waiting costs at most one request
+       * timeout, and only when something is actually outstanding.
+       */
+      let batch = requested
+      const awaitingId = batch.some(
+        (record) => !record.id && record.lookup.status === 'pending',
+      )
+
+      if (inFlightRef.current.size > 0 || awaitingId) {
+        // Show the dock as busy immediately: the wait is a real pause, and
+        // leaving the buttons up invites a second tap.
+        setProgress({
+          done: 0,
+          total: pendingRecords(batch).length,
+          current: null,
+        })
+        await settleLookups()
+        // The ids landed on `recordsRef` while we waited.
+        batch = recordsRef.current
+      }
+
+      if (controller.signal.aborted) {
+        abortRef.current = null
+        setRunning(false)
+        setProgress(null)
+        return
+      }
 
       await runProtocolQueue(batch, {
         signal: controller.signal,
         onProgress: (next) => {
           setProgress(next)
           if (next.current) {
-            setRecords((current) =>
+            commitRecords((current) =>
               current.map((record) =>
                 // Never over an already-filed protocol: a record queued only
                 // for its pending AS would have its `success` replaced by a
@@ -271,7 +366,7 @@ export default function App() {
           }
         },
         onOutcome: (outcome) => {
-          setRecords((current) =>
+          commitRecords((current) =>
             current.map((record) => {
               if (record.num !== outcome.num) return record
               const step: StepState = {
@@ -302,7 +397,7 @@ export default function App() {
       setProgress(null)
       setView('results')
     },
-    [],
+    [commitRecords, settleLookups],
   )
 
   const handleProtocolAll = useCallback(() => {
@@ -332,11 +427,10 @@ export default function App() {
           ? IDLE_STEP
           : record.as,
     }))
-    setRecords(reset)
-    recordsRef.current = reset
+    commitRecords(() => reset)
     setView('dashboard')
     void runQueue(reset)
-  }, [runQueue])
+  }, [commitRecords, runQueue])
 
   const duplicate =
     candidate !== null && records.some((record) => record.num === candidate.num)
@@ -363,7 +457,7 @@ export default function App() {
             onSelectAll={handleSelectAll}
             onRetryLookup={(num) => void runLookup(num)}
             onDelete={(num) =>
-              setRecords((current) =>
+              commitRecords((current) =>
                 current.filter((record) => record.num !== num),
               )
             }

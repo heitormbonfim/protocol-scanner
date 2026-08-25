@@ -1,12 +1,11 @@
 import type { LookupResult, ProtocolResult } from "../types";
 import {
+  API_URL,
   AUTH_TOKEN,
-  LOOKUP_URL,
-  PROTOCOL_AS_URL,
-  PROTOCOL_URL,
   REQUEST_TIMEOUT_MS,
   USE_MOCK,
 } from "./config";
+import { ENDPOINTS, type Endpoint } from "./endpoints";
 
 /**
  * The three backend calls.
@@ -14,42 +13,26 @@ import {
  * 1. `lookupProtocolId` runs the moment the user confirms a scan, turning the
  *    15-digit number into the id the other two calls need.
  * 2. `protocolById` submits the ordinary protocol.
- * 3. `protocolAsById` submits the AS protocol, against a different service.
+ * 3. `protocolAsById` submits the AS protocol.
  *
- * All three go through `request` below, which is the only place in the app that
- * touches `fetch`. It attaches the bearer token, applies the timeout, and turns
- * every failure — HTTP status, network, timeout, abort — into a returned value
- * instead of a thrown error. Nothing above this module ever writes a try/catch.
+ * Each is three lines, because all the work is in `request` below — the only
+ * place in the app that touches `fetch`. It builds the URL, attaches the bearer
+ * token, applies the timeout, and turns every failure — HTTP status, network,
+ * timeout, abort — into a returned value instead of a thrown error. Nothing
+ * above this module ever writes a try/catch.
+ *
+ * Where each call goes is `endpoints.ts`; the host it goes to is `API_URL` in
+ * `config.ts`. Nothing in this file knows a URL.
  *
  * There is no mock branch here: when mocking is enabled the dev server answers
  * these routes itself, so this module behaves identically whether it is talking
  * to a mock or to production. That is the point — the code under test is the
  * code that ships.
- *
- * All three URLs and the token come from `config.ts`, and are set in `.env`.
  */
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-
-/**
- * The method each call uses.
- *
- * The lookup is a GET; both submissions are PUT, which is what the live service
- * accepts. Switching one is a one-word edit here, plus a `body` at the call site
- * if the service wants a payload — `request` handles the serialisation, the
- * Content-Type, and the token, and both mock transports answer any method, so
- * nothing else needs touching.
- *
- * These three verbs are asserted in `api.test.ts` ("HTTP methods"). Every other
- * handler in the suite is method-agnostic, so that one test is what stands
- * between a careless edit here and a silent failure in production.
- */
-const LOOKUP_METHOD: HttpMethod = "GET";
-const PROTOCOL_METHOD: HttpMethod = "PUT";
-const PROTOCOL_AS_METHOD: HttpMethod = "PUT";
-
-export type RequestOptions = {
-  method?: HttpMethod;
+type CallOptions = {
+  /** Appended as a single encoded path segment: `{path}/{id}`. */
+  id?: string;
   /** Merged into the query string. */
   query?: Record<string, string>;
   /**
@@ -68,18 +51,27 @@ type RequestOutcome =
   | { ok: false; reason: string; httpStatus?: number };
 
 /**
- * Resolve a configured URL against the app's origin.
+ * The app's own origin, which is also where the mock listens.
  *
- * Absolute URLs pass through untouched; relative ones become absolute. `fetch`
- * outside a browser (jsdom under test, for one) rejects relative URLs outright,
- * so this must happen before every call, not just where it is convenient.
+ * `fetch` outside a browser (jsdom under test, for one) rejects relative URLs
+ * outright, so every URL has to be made absolute before the call.
  */
 function appOrigin(): string {
   return globalThis.location?.origin ?? "http://localhost";
 }
 
-function resolveUrl(path: string): URL {
-  return new URL(path, appOrigin());
+/** `{API_URL}{path}[/{id}][?query]`, absolute. */
+function buildUrl(
+  { path }: Endpoint,
+  { id, query }: Pick<CallOptions, "id" | "query">,
+): URL {
+  const segment = id === undefined ? "" : `/${encodeURIComponent(id)}`;
+  const url = new URL(`${API_URL}${path}${segment}`, appOrigin());
+
+  for (const [key, value] of Object.entries(query ?? {})) {
+    url.searchParams.set(key, value);
+  }
+  return url;
 }
 
 /**
@@ -96,9 +88,7 @@ function timeoutSignal(ms: number): AbortSignal {
 
   const controller = new AbortController();
   setTimeout(() => {
-    controller.abort(
-      new DOMException("Tempo esgotado", "TimeoutError"),
-    );
+    controller.abort(new DOMException("Tempo esgotado", "TimeoutError"));
   }, ms);
   return controller.signal;
 }
@@ -214,43 +204,34 @@ function readDetail(text: string): string {
  * always carries the token, and always applies the timeout.
  */
 async function request(
-  path: string,
-  { method = "GET", query, body, signal, failure }: RequestOptions = {},
+  endpoint: Endpoint,
+  { id, query, body, signal, failure }: CallOptions = {},
 ): Promise<RequestOutcome> {
   try {
-    const url = resolveUrl(path);
+    const url = buildUrl(endpoint, { id, query });
 
     /*
      * While mocking, nothing may leave this origin.
      *
-     * The mock is the dev server, so a request to any other origin has escaped
-     * it — and for the two submissions that means a real protocol filed against
-     * a live government service while the developer believes nothing is being
-     * sent. `config.ts` already rewrites absolute endpoints to paths so this
-     * should be unreachable; it is here because "should be unreachable" is not
-     * good enough when the failure is an irreversible real submission.
-     *
-     * Refused rather than thrown, so it surfaces as an ordinary failure the
-     * report can show, and refused *before* `fetch`, so nothing goes out.
+     * `API_URL` is already forced to '' when mocking, so this should be
+     * unreachable — but the failure it guards against is a real, irreversible
+     * submission to a live government service, and "should be unreachable" is
+     * not good enough for that. Refused before `fetch`, so nothing goes out,
+     * and returned rather than thrown so it surfaces in the report.
      */
     if (USE_MOCK && url.origin !== appOrigin()) {
       return {
         ok: false,
         reason:
           `Bloqueado: VITE_USE_MOCK está ligado, mas ${url.origin} não é a ` +
-          `origem do app. Nada foi enviado. Use uma URL relativa ` +
-          `(ex.: /api/protocols) ou desligue o mock.`,
+          `origem do app. Nada foi enviado.`,
       };
     }
 
-    for (const [key, value] of Object.entries(query ?? {})) {
-      url.searchParams.set(key, value);
-    }
-
-    const sendsBody = body !== undefined && method !== "GET";
+    const sendsBody = body !== undefined && endpoint.method !== "GET";
 
     const response = await fetch(url, {
-      method,
+      method: endpoint.method,
       headers: {
         Accept: "application/json",
         ...(sendsBody ? { "Content-Type": "application/json" } : {}),
@@ -319,8 +300,7 @@ export async function lookupProtocolId(
   num: string,
   signal?: AbortSignal,
 ): Promise<LookupResult> {
-  const result = await request(LOOKUP_URL, {
-    method: LOOKUP_METHOD,
+  const result = await request(ENDPOINTS.lookup, {
     // If the service turns out to want a POST, this moves from `query` to
     // `body` — the mock reads the number from either.
     query: { protocoloId: num },
@@ -344,18 +324,15 @@ export async function lookupProtocolId(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function submit(
-  baseUrl: string,
-  method: HttpMethod,
+  endpoint: Endpoint,
   id: string,
   label: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  const path = `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(id)}`;
-
-  const result = await request(path, {
-    method,
-    // A POST or PUT here would add something like `body: { id }`; `request`
-    // serialises it and sets the Content-Type.
+  const result = await request(endpoint, {
+    id,
+    // A payload would go here as `body: { … }`; `request` serialises it and
+    // sets the Content-Type.
     signal,
     failure: "falha ao protocolar",
   });
@@ -371,7 +348,7 @@ export function protocolById(
   id: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  return submit(PROTOCOL_URL, PROTOCOL_METHOD, id, "Protocolo", signal);
+  return submit(ENDPOINTS.protocol, id, "Protocolo", signal);
 }
 
 /**
@@ -384,5 +361,5 @@ export function protocolAsById(
   id: string,
   signal?: AbortSignal,
 ): Promise<ProtocolResult> {
-  return submit(PROTOCOL_AS_URL, PROTOCOL_AS_METHOD, id, "AS", signal);
+  return submit(ENDPOINTS.protocolAs, id, "AS", signal);
 }

@@ -71,7 +71,7 @@ export type ProtocolRecord = {
   asProtocoled?: boolean
 }
 
-/** Result of `GET {LOOKUP_URL}?protocoloId=<num>` — resolves a number to an id. */
+/** Result of `GET {lookup}?protocoloId=<num>` — resolves a number to an id. */
 export type LookupResult =
   | { ok: true; id: string }
   | { ok: false; reason: string; httpStatus?: number }

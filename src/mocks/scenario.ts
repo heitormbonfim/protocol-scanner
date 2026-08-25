@@ -65,7 +65,7 @@ export function mockIdFor(num: string): string {
   return `PRT-${num.slice(-6)}`
 }
 
-/** `GET {LOOKUP_URL}?protocoloId=<num>` */
+/** `ENDPOINTS.lookup` — `?protocoloId=<num>` */
 export function lookupReply(num: string | null): MockReply {
   if (!num || !/^\d{15}$/.test(num)) {
     return { status: 400, type: 'json', body: { message: 'protocoloId inválido' } }
@@ -76,7 +76,7 @@ export function lookupReply(num: string | null): MockReply {
   return { status: 200, type: 'json', body: { id: mockIdFor(num) } }
 }
 
-/** `GET {PROTOCOL_URL}/<id>` */
+/** `ENDPOINTS.protocol` — `/<id>` */
 export function protocolReply(id: string): MockReply {
   if (id.endsWith(PROTOCOL_FAILS_ON)) {
     const failure = PROTOCOL_FAILURES[hash(id) % PROTOCOL_FAILURES.length]
@@ -85,7 +85,7 @@ export function protocolReply(id: string): MockReply {
   return { status: 200, type: 'json', body: { id, situacao: 'protocolado' } }
 }
 
-/** `GET {PROTOCOL_AS_URL}/<id>` */
+/** `ENDPOINTS.protocolAs` — `/<id>` */
 export function protocolAsReply(id: string): MockReply {
   if (id.endsWith(AS_FAILS_ON)) {
     return { status: 422, type: 'text', body: 'AS recusado pelo serviço' }
