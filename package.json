@@ -3,13 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@11.13.1",
   "engines": {
-    "node": ">=24.0.0",
-    "pnpm": ">=11.0.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
-    "preinstall": "node scripts/only-pnpm.mjs",
+    "preinstall": "node scripts/check-package-manager.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -18,7 +16,8 @@
     "cert": "node scripts/dev-cert.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "lock:npm": "npm install --package-lock-only --ignore-scripts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "1.1.23",

@@ -27,13 +27,21 @@
  * Everything lands in `certs/`, which is git-ignored — these are secrets, and a
  * committed CA key would let anyone mint certificates your devices trust.
  *
- * Usage:  pnpm cert
+ * Usage:  pnpm cert   (or: npm run cert)
  */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { resolve } from "node:path";
+
+/**
+ * How to spell "run a script" for whoever invoked us, so the instructions
+ * printed below are copy-pasteable under either package manager.
+ */
+const RUN = (process.env.npm_config_user_agent ?? "").startsWith("npm/")
+  ? "npm run"
+  : "pnpm";
 
 const CERT_DIR = resolve(process.cwd(), "certs");
 const CA_KEY = resolve(CERT_DIR, "dev-ca.key");
@@ -175,7 +183,7 @@ function main() {
   }
 
   console.log("\n  Next:");
-  console.log("    1. pnpm build && pnpm preview   (the worker only registers in a production build)");
+  console.log(`    1. ${RUN} build && ${RUN} preview   (the worker only registers in a production build)`);
   for (const entry of lan) {
     console.log(`    2. On the phone, open  https://${entry.address}:4173/dev-ca.crt  to install the CA`);
     break;

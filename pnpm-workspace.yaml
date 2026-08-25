@@ -1,3 +1,30 @@
+# pnpm's settings live here, not in .npmrc: as of pnpm 10 a project-level
+# .npmrc is no longer read, so anything left there is silently inert. .npmrc
+# now holds the npm-side equivalents (see that file).
+
+# `pnpm add x` records "1.2.3", never "^1.2.3". A pin, not a gate — it affects
+# what gets written when you add a package, and never blocks an install.
+saveExact: true
+
+# Transitive dependencies resolve to one version per range, not the newest
+# published at install time.
+resolutionMode: highest
+
+# Deliberately NOT set here:
+#
+#   engineStrict    would turn the advisory "engines" range into a hard install
+#                   failure. Left off so an older Node warns instead of
+#                   refusing.
+#   frozenLockfile  would fail the install whenever the lockfile and
+#                   package.json disagree — including when a different pnpm
+#                   version wants to rewrite the lockfile format. That is the
+#                   setting that made installs fail on other machines.
+#
+# The reproducible install is still available on demand:
+#   pnpm install --frozen-lockfile
+# CI turns it on by default. Locally, an install is allowed to update the
+# lockfile; commit it when it changes.
+
 allowBuilds:
   # msw's postinstall only prints an advisory notice. It is a test-only
   # dependency here — the browser is mocked by the Vite middleware in

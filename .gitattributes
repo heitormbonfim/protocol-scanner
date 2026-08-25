@@ -16,4 +16,5 @@
 *.pdf   binary
 
 # Lockfiles are generated; collapse them in diffs and reviews.
-pnpm-lock.yaml linguist-generated=true -diff
+pnpm-lock.yaml    linguist-generated=true -diff
+package-lock.json linguist-generated=true -diff
