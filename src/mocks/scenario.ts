@@ -1,18 +1,19 @@
 /**
  * What the mock backend does, described independently of how it is delivered.
  *
- * Two transports use these functions, and they must stay in lockstep:
+ * The Vite dev/preview middleware (`plugins/mock-api.ts`) is what the browser
+ * actually talks to; this file is the behaviour behind it, kept separate so the
+ * transport stays about HTTP and this stays about what the answers are.
  *
- *  - the Vite dev/preview middleware (`plugins/mock-api.ts`), which is what the
- *    browser actually talks to;
- *  - the MSW handlers (`handlers.ts`), used by the test suite.
- *
- * Keeping the behaviour here rather than inside either transport means the
- * tests and the running app cannot drift apart.
+ * The server has a mock of its own — `server/shared/mock-upstream.ts`, standing
+ * in for Mais Cidadão rather than for us. It imports the failure digits below,
+ * so a number that reproduces something against this mock reproduces it against
+ * that one too. The shapes differ on purpose: this answers as our API, that one
+ * answers as the government service and still goes through the DTOs.
  *
  * Failures are injected deterministically from the protocol number rather than
  * at random, so a given slip behaves the same way on every run. Randomness
- * would make both manual testing and the test suite flaky.
+ * would make it impossible to reproduce a report on demand.
  *
  * A number's **last two digits** decide its behaviour:
  *
@@ -22,9 +23,15 @@
  * | `98`    | ordinary protocol fails — AS must then be skipped     |
  * | `99`    | ordinary protocol succeeds, AS fails (422)           |
  * | other   | everything succeeds                                  |
+ *
+ * Login is separate, since it has no protocol number to key off: see
+ * `loginReply` at the bottom. Any non-empty credentials are accepted, and the
+ * token it hands back is what the transports then demand on every other route
+ * — so a request that forgets the header fails here, in dev, rather than
+ * against the real service.
  */
 
-/** Anything that survives `JSON.stringify` — matches MSW's `JsonBodyType`. */
+/** Anything that survives `JSON.stringify`. */
 export type JsonBody =
   | string
   | number
@@ -40,9 +47,43 @@ export type MockReply =
 /** Latency the browser-facing transport applies, so spinners behave honestly. */
 export const MOCK_DELAY_MS = 450
 
-const LOOKUP_FAILS_ON = '97'
-const PROTOCOL_FAILS_ON = '98'
-const AS_FAILS_ON = '99'
+/**
+ * The token the mock issues at login, and demands on every other route.
+ *
+ * Hard-coded rather than computed: this file is imported both from Node (the
+ * Vite middleware) and from jsdom (the tests), and base64 encoding differs
+ * enough between the two to not be worth the risk for a constant.
+ *
+ * The payload is real base64url — `{"id_usuario":36,"iat":1700000000,
+ * "exp":4102444800}` — so the client's `jwtExpiry()` parses it and finds an
+ * expiry in 2100. Anything unparseable would make the mock look like an
+ * expired session on every reload.
+ *
+ * The signature is not a signature. Nothing verifies it; the mock compares the
+ * whole string.
+ */
+export const MOCK_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
+  'eyJpZF91c3VhcmlvIjozNiwicGVzc29hX2lkIjpudWxsLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.' +
+  'mock-signature-nao-verificada'
+
+/** Who you are while mocking. Matches the DTO in `server/auth/auth.dto.ts`. */
+export const MOCK_USER = {
+  nome: 'Heitor',
+  nivel_permissao: 'Atendente',
+  podeProtocolar: true,
+}
+
+/*
+ * Exported so the server's own mock (`server/shared/mock-upstream.ts`) keys off
+ * the same digits. The two return different *shapes* on purpose — this file
+ * answers as our API, that one answers as Mais Cidadão, so the server's DTOs
+ * still run — but a slip ending in 98 must fail in both, or a number that
+ * reproduces a bug in the browser stops reproducing it against the server.
+ */
+export const LOOKUP_FAILS_ON = '97'
+export const PROTOCOL_FAILS_ON = '98'
+export const AS_FAILS_ON = '99'
 
 /** Cheap stable hash, so the failure reason is reproducible per id. */
 function hash(value: string): number {
@@ -65,15 +106,25 @@ export function mockIdFor(num: string): string {
   return `PRT-${num.slice(-6)}`
 }
 
-/** `ENDPOINTS.lookup` — `?protocoloId=<num>` */
+/**
+ * `ENDPOINTS.lookup` — `?protocoloId=<num>`
+ *
+ * Answers with the same three-field DTO the real server does
+ * (`server/protocolo/protocolo.dto.ts`), so what the client parses under mock
+ * is the shape it parses in production.
+ */
 export function lookupReply(num: string | null): MockReply {
   if (!num || !/^\d{15}$/.test(num)) {
-    return { status: 400, type: 'json', body: { message: 'protocoloId inválido' } }
+    return { status: 400, type: 'json', body: { message: 'protocoloId deve ter 15 dígitos' } }
   }
   if (num.endsWith(LOOKUP_FAILS_ON)) {
     return { status: 503, type: 'json', body: { message: 'Serviço indisponível' } }
   }
-  return { status: 200, type: 'json', body: { id: mockIdFor(num) } }
+  return {
+    status: 200,
+    type: 'json',
+    body: { id: mockIdFor(num), numprotocolo: num, data: '2026-08-26' },
+  }
 }
 
 /** `ENDPOINTS.protocol` — `/<id>` */
@@ -91,4 +142,31 @@ export function protocolAsReply(id: string): MockReply {
     return { status: 422, type: 'text', body: 'AS recusado pelo serviço' }
   }
   return { status: 200, type: 'json', body: { id, situacao: 'as-protocolado' } }
+}
+
+/**
+ * `ENDPOINTS.login` — `{ email, senha }`
+ *
+ * Any non-empty pair is accepted: the mock is here to exercise the app's own
+ * flow, not to be an authentication system. Two cases are worth failing on
+ * anyway, because both are real bugs the app should survive.
+ *
+ * | credentials      | behaviour                                    |
+ * | ---------------- | -------------------------------------------- |
+ * | empty            | 400 — the client sent a blank field           |
+ * | senha `errado`   | 401 — so the login screen's error path is testable |
+ * | anything else    | 200 with MOCK_TOKEN and MOCK_USER             |
+ */
+export function loginReply(email: string | null, senha: string | null): MockReply {
+  if (!email || !senha) {
+    return { status: 400, type: 'json', body: { message: 'Informe usuário e senha' } }
+  }
+  if (senha === 'errado') {
+    return { status: 401, type: 'json', body: { message: 'Usuário ou senha inválidos' } }
+  }
+  return {
+    status: 200,
+    type: 'json',
+    body: { token: MOCK_TOKEN, usuario: { ...MOCK_USER } },
+  }
 }

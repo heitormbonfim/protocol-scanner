@@ -4,12 +4,16 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatProtocol } from '@/lib/protocol'
 import { recordOutcomes } from '@/lib/queue'
+import { UserChip } from '@/components/UserChip'
+import type { Usuario } from '@/lib/session'
 import type { ProtocolOutcome, ProtocolRecord } from '@/types'
 
 type ResultsPanelProps = {
   records: ProtocolRecord[]
   onRetryFailed: () => void
   onBack: () => void
+  usuario: Usuario
+  onLogout: () => void
 }
 
 const KIND_LABEL: Record<ProtocolOutcome['kind'], string> = {
@@ -51,7 +55,13 @@ function ResultRow({ outcome }: { outcome: ProtocolOutcome }) {
   )
 }
 
-export function ResultsPanel({ records, onRetryFailed, onBack }: ResultsPanelProps) {
+export function ResultsPanel({
+  records,
+  onRetryFailed,
+  onBack,
+  usuario,
+  onLogout,
+}: ResultsPanelProps) {
   const [copied, setCopied] = useState(false)
 
   // Derived from the records rather than held in state, so the report survives
@@ -89,11 +99,15 @@ export function ResultsPanel({ records, onRetryFailed, onBack }: ResultsPanelPro
         <Button size="icon" variant="ghost" onClick={onBack} aria-label="Voltar">
           <ArrowLeft />
         </Button>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-bold tracking-tight">Relatório</h1>
           <p className="text-sm text-muted-foreground">
             {succeeded.length} com sucesso · {failed.length} com falha
           </p>
+        </div>
+        {/* `ml-auto`: this header has no justify-between, unlike Dashboard's. */}
+        <div className="ml-auto">
+          <UserChip usuario={usuario} onLogout={onLogout} />
         </div>
       </header>
 

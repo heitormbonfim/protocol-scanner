@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
+import { AuthGate } from './components/AuthGate.tsx'
 
 /*
  * No mock bootstrapping happens here.
@@ -13,9 +13,14 @@ import App from './App.tsx'
  * so nothing to fail.
  */
 
+/*
+ * `AuthGate` rather than `App` directly: the app is behind a login now, and
+ * gating from out here means none of App's state, camera or stored history
+ * comes up until someone is actually logged in. See components/AuthGate.tsx.
+ */
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AuthGate />
   </StrictMode>,
 )
 

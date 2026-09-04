@@ -31,6 +31,8 @@ import {
   pendingRecords,
   type QueueProgress,
 } from '@/lib/queue'
+import { UserChip } from '@/components/UserChip'
+import type { Usuario } from '@/lib/session'
 import type { ProtocolRecord } from '@/types'
 
 type DashboardProps = {
@@ -48,6 +50,8 @@ type DashboardProps = {
   onProtocolAll: () => void
   onAbort: () => void
   onViewResults: () => void
+  usuario: Usuario
+  onLogout: () => void
 }
 
 function Stat({
@@ -90,7 +94,22 @@ export function Dashboard({
   onProtocolAll,
   onAbort,
   onViewResults,
+  usuario,
+  onLogout,
 }: DashboardProps) {
+  /*
+   * Whether this user may file at all.
+   *
+   * Derived by the server from the upstream `permissoes` array, so that array
+   * never has to leave — see `toSessionDto` in server/auth/auth.dto.ts. Without
+   * this check a read-only login would happily start a batch and collect a 403
+   * per slip, which reads as a broken app rather than as the wrong account.
+   *
+   * Read straight off the session, with no fallback: there is deliberately no
+   * "unknown, assume allowed" path, because that path would only ever be taken
+   * by accident.
+   */
+  const podeProtocolar = usuario.podeProtocolar
   const [query, setQuery] = useState('')
 
   /** Records with work left that the user has actually left ticked. */
@@ -151,7 +170,7 @@ export function Dashboard({
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="pt-safe sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-md">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-bold tracking-tight">
               Leitor de Protocolos
@@ -162,16 +181,14 @@ export function Dashboard({
                 : `${stats.total} no histórico · ${stats.done} protocolados`}
             </p>
           </div>
-          {hasResults && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={onViewResults}
-            >
-              <FileText /> Relatório
-            </Button>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {hasResults && (
+              <Button variant="outline" size="sm" onClick={onViewResults}>
+                <FileText /> Relatório
+              </Button>
+            )}
+            <UserChip usuario={usuario} onLogout={onLogout} />
+          </div>
         </div>
       </header>
 
@@ -318,12 +335,14 @@ export function Dashboard({
                 size="lg"
                 className="flex-[1.4]"
                 onClick={onProtocolAll}
-                disabled={toSend.length === 0}
+                disabled={toSend.length === 0 || !podeProtocolar}
               >
                 <Send />
-                {toSend.length === 0
-                  ? 'Nada a enviar'
-                  : `Protocolar ${toSend.length}`}
+                {!podeProtocolar
+                  ? 'Sem permissão'
+                  : toSend.length === 0
+                    ? 'Nada a enviar'
+                    : `Protocolar ${toSend.length}`}
               </Button>
             )}
           </div>

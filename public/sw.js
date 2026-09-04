@@ -10,10 +10,11 @@
  * falls straight through to the network untouched.
  *
  * Both submissions are PUT, so they are excluded by the method check alone; the
- * ID lookup is a GET, and it is excluded because it matches no static pattern.
- * That is two independent reasons, which is the intent: a future endpoint that
- * happened to end in `.json` still would not be cached, because the check is
- * against the app's own asset paths rather than against a list of API routes.
+ * ID lookup is a GET, and it is excluded twice over — by an explicit `/api/`
+ * bypass, and because it matches no static pattern. Those are independent on
+ * purpose: a future endpoint that happened to end in `.json` still would not be
+ * cached, because the second check is against the app's own asset paths rather
+ * than against a list of API routes.
  *
  * ── Registration ────────────────────────────────────────────────────────────
  * Registered from src/main.tsx in production builds only. A browser refuses to
@@ -24,7 +25,7 @@
  * Bump VERSION to retire every previous cache on the next activation.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `shell-${VERSION}`;
 const ASSET_CACHE = `assets-${VERSION}`;
 const VENDOR_CACHE = `vendor-${VERSION}`;
@@ -101,6 +102,19 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
+
+  /*
+   * Never the API.
+   *
+   * It is same-origin now — the Express server in `server/` serves this build
+   * and answers `/api` from the same port — so the static-asset allowlist below
+   * is the only thing standing between a submission and a cache. Make it two
+   * things. Cheap, explicit, and it survives someone adding a route that
+   * happens to end in a cacheable-looking extension.
+   */
+  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+    return;
+  }
 
   // The page itself: network first, so a new build is picked up as soon as
   // there is a connection, with the cached shell as the offline fallback.

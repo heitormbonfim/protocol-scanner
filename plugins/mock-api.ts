@@ -1,6 +1,8 @@
 import type { Connect, Plugin, ViteDevServer, PreviewServer } from 'vite'
 import {
   MOCK_DELAY_MS,
+  MOCK_TOKEN,
+  loginReply,
   lookupReply,
   protocolAsReply,
   protocolReply,
@@ -12,7 +14,7 @@ import { ENDPOINTS } from '../src/lib/endpoints.ts'
  * Serves the mock API from the dev server itself, instead of from a service
  * worker in the browser.
  *
- * ## Why not MSW's browser worker
+ * ## Why not a service worker
  *
  * The dev server runs over HTTPS with a self-signed certificate whose SAN
  * covers only `localhost` and `127.0.0.1`. A phone reaching it on the LAN IP
@@ -22,22 +24,27 @@ import { ENDPOINTS } from '../src/lib/endpoints.ts'
  * or not. A service worker is persistent code, so that refusal is deliberate
  * and not something the page can opt out of.
  *
- * That made MSW's browser worker unusable on the one device this app is for.
+ * That made a browser worker unusable on the one device this app is for.
  * Handling the routes here works over any origin, with or without a valid
  * certificate, and needs nothing installed on the phone.
  *
- * MSW is still the mocking layer for the test suite, driving the same
- * `scenario.ts` behaviour, so the two cannot drift apart.
+ * ## Which mock is which
+ *
+ * There are two, and they answer different questions:
+ *
+ *   this file                  the browser talking to our API. Used by
+ *                              `pnpm dev`, when VITE_USE_MOCK is on.
+ *   server/shared/mock-upstream.ts
+ *                              our API talking to Mais Cidadão. On by default,
+ *                              everywhere but the deployment machine.
+ *
+ * They share the failure-digit convention — the constants are exported from
+ * `scenario.ts` and imported by both — so a number that reproduces something
+ * here reproduces it there too.
  */
 
 export type MockApiOptions = {
   enabled: boolean
-  /**
-   * When set, every route demands `Authorization: Bearer <token>` and answers
-   * 401 otherwise. Mirrors `VITE_AUTH_TOKEN`, so a token that never reaches the
-   * request fails here, in dev, rather than against the real service.
-   */
-  token?: string
   /** Artificial latency, so spinners and progress bars behave realistically. */
   delayMs?: number
 }
@@ -111,13 +118,15 @@ function segmentAfter(pathname: string, base: string): string | null {
 /*
  * The paths come from `src/lib/endpoints.ts`, the same table the client builds
  * its URLs from, so the two cannot drift. They are bare paths, which is exactly
- * what this middleware compares against `req.url` — and while mocking the
- * client's base URL is forced to '' (see `API_URL` in src/lib/config.ts), so
- * every call lands here rather than on a real host.
+ * what this middleware compares against `req.url`. Every call the app makes is
+ * a same-origin relative path now, so they all land here rather than on a real
+ * host — and with mocking on, `API_URL` in src/lib/config.ts is additionally
+ * pinned to '' so that cannot be configured away.
  */
 
 export function mockApi(options: MockApiOptions): Plugin {
-  const { enabled, token } = options
+  const { enabled } = options
+  const loginUrl = ENDPOINTS.login.path
   const lookupUrl = ENDPOINTS.lookup.path
   const protocolUrl = ENDPOINTS.protocol.path
   const protocolAsUrl = ENDPOINTS.protocolAs.path
@@ -134,8 +143,11 @@ export function mockApi(options: MockApiOptions): Plugin {
     const asId = segmentAfter(pathname, protocolAsUrl)
     const protocolId = segmentAfter(pathname, protocolUrl)
     const isLookup = pathname === lookupUrl
+    const isLogin = pathname === loginUrl
 
-    if (asId === null && protocolId === null && !isLookup) return next()
+    if (asId === null && protocolId === null && !isLookup && !isLogin) {
+      return next()
+    }
 
     if (req.method === 'OPTIONS') {
       res.statusCode = 204
@@ -145,14 +157,26 @@ export function mockApi(options: MockApiOptions): Plugin {
       return res.end()
     }
 
-    if (token && req.headers.authorization !== `Bearer ${token}`) {
+    /*
+     * Every route but login demands the token this mock itself issued.
+     *
+     * It used to compare against `VITE_AUTH_TOKEN`, a build-time value that no
+     * longer exists. Validating its own token is strictly better: it proves the
+     * client actually stored what it got from `/auth/login` and put it back on
+     * the wire, so a broken session wiring fails here, in dev, rather than
+     * against the real service.
+     *
+     * Login is exempt for the obvious reason — you cannot present a token in
+     * order to obtain one.
+     */
+    if (!isLogin && req.headers.authorization !== `Bearer ${MOCK_TOKEN}`) {
       return send(res, {
         status: 401,
         type: 'json',
         body: {
           message:
-            'Mock: Authorization ausente ou diferente de VITE_AUTH_TOKEN. ' +
-            'Confira o header enviado em src/lib/api.ts.',
+            'Mock: Authorization ausente ou diferente do token emitido no ' +
+            'login. Confira o header enviado em src/lib/api.ts.',
         },
       })
     }
@@ -161,7 +185,11 @@ export function mockApi(options: MockApiOptions): Plugin {
       let reply: MockReply
       if (asId !== null) reply = protocolAsReply(asId)
       else if (protocolId !== null) reply = protocolReply(protocolId)
-      else {
+      else if (isLogin) {
+        const body = await readJsonBody(req)
+        const text = (value: unknown) => (typeof value === 'string' ? value : null)
+        reply = loginReply(text(body.email), text(body.senha))
+      } else {
         // The number arrives in the query string on a GET and in the body on
         // anything else, so a lookup switched to POST still resolves.
         const body = await readJsonBody(req)

@@ -26,10 +26,11 @@ resolutionMode: highest
 # lockfile; commit it when it changes.
 
 allowBuilds:
-  # msw's postinstall only prints an advisory notice. It is a test-only
-  # dependency here — the browser is mocked by the Vite middleware in
-  # plugins/mock-api.ts, not by a service worker.
-  msw: false
+  # esbuild (via tsx, which runs the server's TypeScript) links its platform
+  # binary in a postinstall. Unlike the one below this is load-bearing: without
+  # it `pnpm server` cannot start, which on the deployment machine means the
+  # app does not come up at all.
+  esbuild: true
   # tesseract.js' only install script is `opencollective-postinstall`, a
   # donation banner. Nothing about the WASM core or the OCR models depends on
   # it, so there is no reason to let it run.

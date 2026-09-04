@@ -22,11 +22,23 @@ import {
   saveRecords,
 } from '@/lib/storage'
 import type { Roi } from '@/lib/preprocess'
+import type { Session } from '@/lib/session'
 import type { ProtocolRecord, ScanCandidate, StepState, View } from '@/types'
 
 const IDLE_STEP: StepState = { status: 'idle' }
 
-export default function App() {
+/**
+ * `AuthGate` is the only thing that renders this, and it only does so once
+ * there is a session — so both props are required. That is what keeps the
+ * permission check below honest: there is no "no session" case for
+ * `podeProtocolar` to fall back to.
+ */
+type AppProps = {
+  session: Session
+  onLogout: () => void
+}
+
+export default function App({ session, onLogout }: AppProps) {
   const [view, setView] = useState<View>('dashboard')
   const [scannerOpen, setScannerOpen] = useState(false)
   /*
@@ -465,12 +477,16 @@ export default function App() {
             onProtocolAll={handleProtocolAll}
             onAbort={() => abortRef.current?.abort()}
             onViewResults={() => setView('results')}
+            usuario={session.usuario}
+            onLogout={onLogout}
           />
         ) : (
           <ResultsPanel
             records={records}
             onRetryFailed={handleRetryFailed}
             onBack={() => setView('dashboard')}
+            usuario={session.usuario}
+            onLogout={onLogout}
           />
         )}
       </div>

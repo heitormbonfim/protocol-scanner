@@ -12,13 +12,13 @@ Built for working through a physical pile: *point, confirm, next.*
 ![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-4-06b6d4?logo=tailwindcss&logoColor=white)
 ![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8?logo=pwa&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-239%20passing-3fb950)
+![Windows](https://img.shields.io/badge/deploys%20to-Windows-0078d4?logo=windows)
 
 </div>
 
 ---
 
-> **Four guarantees the code is built around**
+> **Five guarantees the code is built around**
 >
 > | | |
 > | --- | --- |
@@ -26,6 +26,7 @@ Built for working through a physical pile: *point, confirm, next.*
 > | 🆔 **Nothing goes out without its id** | A run waits for the confirm-time lookups instead of failing the slips still resolving — [details](#nothing-is-submitted-without-its-id) |
 > | 🔁 **Nothing is filed twice** | A filed protocol is remembered in a sticky flag, so no rerun, reload or abort can resend it — [details](#nothing-is-ever-filed-twice) |
 > | 🧪 **Mocking is all-or-nothing** | With mocks on, nothing can reach a real service — [details](#mocking-cannot-be-half-on) |
+> | 🛡️ **Citizen data never leaves the server** | The API strips every personal field before a browser can see it — [details](#the-dto-boundary) |
 
 ---
 
@@ -36,9 +37,11 @@ Built for working through a physical pile: *point, confirm, next.*
 - [Running it on your phone](#running-it-on-your-phone)
 - [Installing it as an app (PWA)](#installing-it-as-an-app-pwa)
 - [Configuration](#configuration)
-- [Wiring up the real API](#wiring-up-the-real-api)
-- [Testing](#testing) — start here if you are new to the project
-- [Test coverage](#test-coverage)
+- [The DTO boundary](#the-dto-boundary) — **read this before touching `server/`**
+- [Running the server](#running-the-server)
+- [Using it from an iPhone](docs/IPHONE.md)
+- [Verifying a change](#verifying-a-change) — start here if you are new to the project
+- [Setting up the Windows machine](docs/WINDOWS.md)
 - [How accurate is the OCR?](#how-accurate-is-the-ocr)
 - [Project layout](#project-layout)
 - [Scripts](#scripts)
@@ -97,9 +100,9 @@ to ask for it:
   than silently skipped — so the report never implies something was submitted
   when it was not.
 
-This is enforced in one place, [`runRecord` in src/lib/queue.ts](src/lib/queue.ts),
-and is covered by tests that assert the AS endpoint is never contacted when the
-ordinary one fails.
+This is enforced in one place, [`runRecord` in src/lib/queue.ts](src/lib/queue.ts).
+To check it by hand, scan a number ending in `98`: the ordinary protocol fails,
+and the AS endpoint must never be contacted.
 
 ### Nothing is submitted without its id
 
@@ -121,7 +124,7 @@ fine. So a run now waits for outstanding lookups before sending anything:
 
 `Parar` works during the wait, and the run stops before the first request.
 
-Covered by [src/App.test.tsx](src/App.test.tsx), which holds a lookup open and
+To check it by hand, scan a number ending in `97`, whose lookup fails, and
 asserts the submission does not overtake it.
 
 ### Nothing is ever filed twice
@@ -149,9 +152,8 @@ So the rule is now:
   for records written before it existed — without that migration, upgrading
   would have re-filed every protocol in an existing history exactly once.
 
-Covered by the **never files the same protocol twice** tests in `queue.test.ts`,
-which drive the exact wreckage state, and by the migration tests in
-`storage.test.ts`.
+To check it by hand: run a batch, then press *Protocolar todos* again. Every
+record that already succeeded must be skipped.
 
 ---
 
@@ -389,8 +391,8 @@ could see. So only three things are ever stored:
 are excluded because they are `PUT` and the worker only ever considers `GET`;
 the ID lookup is a `GET`, and is excluded because it matches no static-asset
 pattern. Two independent reasons, on purpose. This is pinned by
-[src/test/sw.test.ts](src/test/sw.test.ts) — if you widen the cache rules, those
-tests are what should stop you.
+If you widen the cache rules, re-read that comment first — it is now the only
+thing standing between a submission and a cache.
 
 ### Installing on a phone
 
@@ -449,7 +451,7 @@ this machine's LAN address, signed by a local CA you install on the phone once:
 
 ```bash
 pnpm cert                # writes certs/ — CA + server certificate
-pnpm build && pnpm preview
+pnpm start               # build, then serve app + API on 4173
 ```
 
 Then, **on the phone**, open `https://<lan-ip>:4173/dev-ca.crt` and install it:
@@ -461,6 +463,11 @@ Then, **on the phone**, open `https://<lan-ip>:4173/dev-ca.crt` and install it:
   General → **VPN & Device Management** → install it. Then the step everyone
   misses: Settings → General → About → **Certificate Trust Settings** → switch
   it on. iOS ignores a user-installed root until you do.
+
+> **Sending this to someone who is not a developer?** Point them at
+> **[docs/IPHONE.md](docs/IPHONE.md)** instead — the same steps in Portuguese,
+> written for whoever is holding the phone, with the troubleshooting they will
+> actually hit. Android needs none of it; it lets you click through the warning.
 
 Reload the app and it should offer **Install app**.
 
@@ -478,13 +485,15 @@ To exercise the worker without any certificate at all:
 
 ```bash
 pnpm build
-pnpm preview:pwa      # http://localhost:4173
+pnpm server:http      # http://localhost:4173
 ```
 
 That serves the real build over **plain HTTP on localhost**, which browsers
 treat as a secure context — so the service worker registers *and* the camera
-still works. (`preview:pwa` is just `HTTPS=false vite preview --host localhost`;
-the ordinary `pnpm preview` keeps HTTPS for LAN testing.)
+still works. It is the same server as `pnpm server`, with TLS off.
+
+A flag (`--http`) rather than an env var, because `HTTPS=false cmd` means
+nothing in Windows' cmd or PowerShell, and Windows is where this is deployed.
 
 Then, in Chrome DevTools:
 
@@ -501,10 +510,14 @@ Then, in Chrome DevTools:
    `vendor-v1` rather than the network.
 
 For a real install on a phone, see [Installing on a
-phone](#installing-on-a-phone) above. A public tunnel (`ngrok`, Cloudflare
-Tunnel) also gives a trusted certificate with no device setup — but note the
-build **inlines `VITE_AUTH_TOKEN` into the bundle**, so a public URL hands that
-token to anyone who finds it. The local CA keeps everything on the LAN.
+phone](#installing-on-a-phone) above, and [docs/IPHONE.md](docs/IPHONE.md) for
+iOS specifically.
+
+A public tunnel (`ngrok`, Cloudflare Tunnel) gives a trusted certificate with no
+device setup, and no longer leaks a token — there is none in the bundle any more.
+It does, however, put a login form for a government service on the open internet,
+protected by nothing but whoever's password. The local CA keeps everything on the
+LAN, which is the reason to prefer it.
 
 ### Shipping an update
 
@@ -521,81 +534,111 @@ is dropped on the next activation.
 
 ## Configuration
 
-Copy [`.env.example`](.env.example) to `.env.local` and edit. Vite only exposes
-`VITE_`-prefixed variables and **inlines them at build time**, so rebuild after
-changing any of them.
+Copy [`.env.example`](.env.example) to `.env` and edit. One file feeds two
+processes, and the prefix is what separates them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `UPSTREAM_URL` | — | **Required.** The Mais Cidadão service. Server-side only |
+| `PORT` | `4173` | The one port serving the app *and* the API |
+| `UPSTREAM_TIMEOUT_MS` | `20000` | How long the server waits on Mais Cidadão |
 | `VITE_USE_MOCK` | `true` | Serve the mock API from the dev server |
-| `VITE_API_URL` | *(empty)* | Base URL of the service — scheme and host only |
-| `VITE_AUTH_TOKEN` | *(empty)* | Sent as `Authorization: Bearer <token>` |
-| `VITE_REQUEST_TIMEOUT_MS` | `5000` | Per-request timeout |
+| `VITE_REQUEST_TIMEOUT_MS` | `25000` | Per-request timeout, browser side |
 
-### One URL, and where the paths live
+`VITE_`-prefixed variables are **inlined into the bundle at build time**, so
+rebuild after changing one — and so anyone with the app can read them.
+Everything unprefixed stays in `server/`, because Vite's `envPrefix` drops it.
 
-`VITE_API_URL` is a **base**: scheme and host, no trailing slash, no path. Every
-call goes to the same service, so there is one variable rather than three.
+That split is not a convention, it is the mechanism: `UPSTREAM_URL` names the
+real government service, and `pnpm build && grep -r maiscidadao dist/` returns
+nothing. See [The DTO boundary](#the-dto-boundary).
 
-The paths and methods are not configuration — they are the shape of the
-service's contract, so they live in code, in
-[src/lib/endpoints.ts](src/lib/endpoints.ts):
+`UPSTREAM_URL` has no default and the server refuses to boot without it. There
+is no safe guess: a wrong one either fails everything or quietly points a batch
+of real submissions somewhere nobody intended, and a submission has no undo.
+
+### No URL, and where the paths live
+
+There is no `VITE_API_URL`. Every call the app makes is a **same-origin relative
+path** under `/api`, answered by the Express server in `server/` — which serves
+this very build from the same port. Nothing to configure per machine, and it
+works on any network:
 
 ```
-GET {VITE_API_URL}/protocolo?protocoloId=<15 digits>   ->  { "id": "..." }
-PUT {VITE_API_URL}/protocolo/protocolaragendamento/<id>
-PUT {VITE_API_URL}/protocolo/protocolaragendamentoas/<id>
+POST /api/auth/login                              -> { token, usuario }
+GET  /api/protocolos?protocoloId=<15 digits>      -> { id, numprotocolo, data }
+PUT  /api/protocolos/protocolar/<id>
+PUT  /api/protocolos/protocolar-as/<id>
+GET  /api/health                                  -> { ok, upstream }
 ```
 
-That table is imported by all three consumers — the client
-([src/lib/api.ts](src/lib/api.ts)), the dev-server mock
-([plugins/mock-api.ts](plugins/mock-api.ts)) and the test mock
-([src/mocks/handlers.ts](src/mocks/handlers.ts)) — so they cannot disagree about
-where a call goes, and changing a route is one edit reviewed in one diff.
+Those are **our** paths. What they map to at Mais Cidadão lives in
+[server/protocolo/protocolo.service.ts](server/protocolo/protocolo.service.ts)
+and nowhere else.
 
-Leave `VITE_API_URL` **empty** to call the app's own origin, which is what you
-want when routing through the Vite dev proxy. An absolute `https://` URL works
-too if the service sends CORS headers.
+The table above is [src/lib/endpoints.ts](src/lib/endpoints.ts), imported by all
+three consumers — the client ([src/lib/api.ts](src/lib/api.ts)), the dev-server
+mock ([plugins/mock-api.ts](plugins/mock-api.ts)) and the server
+([server/api.routes.ts](server/api.routes.ts)) — so they cannot disagree about
+where a call goes.
+
+Note the id is always the **last** path segment (`/protocolar/<id>`, never
+`/<id>/protocolar`). `segmentAfter` in the dev-server mock matches on exactly
+that shape, and `protocolar-as` is a sibling of `protocolar` rather than a path
+beneath it, so neither can shadow the other.
 
 ### Auth
 
-Set `VITE_AUTH_TOKEN` and **every** request — the ID lookup and both
-submissions — carries `Authorization: Bearer <token>`. Leave it empty and no
-`Authorization` header is sent at all, rather than a `Bearer` with nothing after
-it, which services tend to answer with a 400 instead of the 401 that would tell
-you the token is missing.
+There is no `VITE_AUTH_TOKEN`. It was compiled into the bundle — the same token
+for every user, readable by anyone with the app, and impossible to attribute to
+a person.
 
-> The token is **not secret once built.** Vite inlines it into the JS bundle, so
-> anyone with the app can read it. That is fine for a token issued to this app
-> on a controlled device. If it must not leave the server, leave the variable
-> empty and have the proxy in [vite.config.ts](vite.config.ts) — or whatever
-> fronts the app in production — attach the header instead.
+Each operator logs in instead. `POST /api/auth/login` forwards the credentials
+to Mais Cidadão, and the session that comes back is stripped to `nome`,
+`nivel_permissao` and `podeProtocolar` before the browser sees it. The token is
+kept in `localStorage` ([src/lib/session.ts](src/lib/session.ts)), so a phone
+auto-logs-in and survives a restart of the API — the header shows who is filing,
+which matters on a shared phone.
 
-While mocking, a configured token is **enforced**: the mock answers 401 to a
-request that does not carry it, so a broken wiring fails in dev rather than
-against the real service.
+Two behaviours worth knowing:
+
+- **A stored, unexpired token gets you in with no round trip.** The app is
+  usable offline by design, and a gate that waited on the network would turn "no
+  signal" into a login screen nobody could get past. Only a real HTTP 401 clears
+  the session; a network failure never does.
+- **The first 401 ends the run.** `api.ts` sets a flag and every later call
+  returns immediately without touching the network. A token expiring at slip 87
+  of 200 would otherwise cost 113 pointless round trips and 113 junk rows in the
+  report. A **403** is deliberately not treated this way — that is per-slip, and
+  folding it in would log the operator out over one bad record.
+
+While mocking, the token is still **enforced**: the mock issues one at login and
+answers 401 to any other request that does not carry it back. So a session that
+was never stored, or never put on the wire, fails in dev rather than against the
+real service.
 
 ### Methods
 
-Each call's HTTP method is a named constant at the top of
-[src/lib/api.ts](src/lib/api.ts):
+Each call's method sits next to its path in
+[src/lib/endpoints.ts](src/lib/endpoints.ts):
 
-| Constant | Method | Call |
+| Endpoint | Method | Call |
 | --- | --- | --- |
-| `LOOKUP_METHOD` | `GET` | `?protocoloId=<num>` → `{ id }` |
-| `PROTOCOL_METHOD` | `PUT` | ordinary protocol submission |
-| `PROTOCOL_AS_METHOD` | `PUT` | AS submission |
+| `login` | `POST` | `{ email, senha }` → `{ token, usuario }` |
+| `lookup` | `GET` | `?protocoloId=<num>` → the protocol DTO |
+| `protocol` | `PUT` | ordinary protocol submission |
+| `protocolAs` | `PUT` | AS submission |
 
-To change one, edit the constant and, if the service wants a payload, add a
-`body` at that call site. The shared `request` helper serialises it, sets the
-Content-Type, attaches the token and applies the timeout, and every mock
-handler answers any method — so nothing else needs touching.
+To change one, edit the table and, if the call wants a payload, add a `body` at
+that call site. The shared `request` helper serialises it, sets the
+Content-Type, attaches the token and applies the timeout, and every mock handler
+answers any method — so nothing else needs touching. Only
+[server/api.routes.ts](server/api.routes.ts) has to agree, since Express does
+police the verb.
 
-> The three verbs are asserted in `api.test.ts` (**HTTP methods**). Every other
-> handler in the suite is deliberately method-agnostic (`http.all`), so that one
-> test is the only thing standing between a careless edit here and a silent
-> failure against the real service. If you change a verb on purpose, update that
-> test in the same commit.
+> Change a verb and [server/api.routes.ts](server/api.routes.ts) has to change
+> with it — Express does police the method, and a mismatch surfaces as the
+> terminal `404` from the `/api` router rather than as anything more helpful.
 
 **Mocking defaults to on.** A fresh clone with no `.env` runs against mocks
 rather than firing real submissions at a live government service because
@@ -604,42 +647,45 @@ someone forgot to create one.
 ### Mocking cannot be half-on
 
 There used to be a way to have `VITE_USE_MOCK=true` and still file real
-protocols, and it was completely silent. It is worth understanding, because the
-configuration that causes it is the obvious one.
+protocols, and it was completely silent: the mock is served by the dev server,
+so it can only intercept requests that *reach* the dev server, and
+`VITE_API_URL` was free to point somewhere else. Mocking looked on. Every
+submission was real, and a filed protocol has no undo.
 
-The mock is served by the **dev server**, so it can only intercept requests that
-reach the dev server. Leave the base URL pointing at the real service —
+That configuration no longer exists to be got wrong. Every call is a same-origin
+relative path, so there is no host to point anywhere — and with it, the question
+moved. **What decides whether a submission is real is now which process you
+started**, and that is invisible from a phone. So the answer moved to the server:
 
-```dotenv
-VITE_USE_MOCK=true
-VITE_API_URL=https://real-service.example
-```
+1. **It refuses to boot without an explicit `UPSTREAM_URL`.** No default, no
+   guess.
+2. **It says so on every start**, in the banner:
+   `⚠ SUBMISSÕES REAIS → https://…`
+3. **`GET /api/health` reports what it is pointed at**, so you can check from
+   anywhere on the network without reading a terminal.
 
-— and the browser sends that request straight past the dev server to the real
-host. Mocking looks on. Every submission is real, and a filed protocol has no
-undo.
+The two client-side defences are kept as a tripwire rather than deleted:
 
-Two independent defences now prevent it:
+- `API_URL` in [src/lib/config.ts](src/lib/config.ts) is unconditionally `''`,
+  so a stray `VITE_API_URL` in someone's `.env` cannot point a submission
+  anywhere.
+- `request` in [src/lib/api.ts](src/lib/api.ts) still refuses anything that
+  would leave this origin — before `fetch`, so nothing goes out. That catches
+  the one remaining route in: a bad path in `endpoints.ts`, such as a
+  protocol-relative `//host/path` that looks like a path and is not.
 
-1. **The base URL is derived from `USE_MOCK`, not merely defaulted**
-   ([src/lib/config.ts](src/lib/config.ts)): while mocking it is `''`, so every
-   call resolves against this origin where the dev server answers it. No value
-   of `VITE_API_URL` can override that, which makes the dangerous state
-   unreachable by configuration rather than just discouraged. You can flip
-   `VITE_USE_MOCK` on and off without touching the URL.
-2. **Anything that would still leave this origin is refused**
-   ([src/lib/api.ts](src/lib/api.ts)) — before `fetch`, so nothing goes out. It
-   surfaces as an ordinary failure reading *"Bloqueado: VITE_USE_MOCK está
-   ligado…"*. This catches what the rewrite cannot, such as a protocol-relative
-   `//host/path`.
+Deleting those two would be the tempting cleanup that leaves nothing at all, in
+a change that already removed the original guarantee.
 
-Both are covered by the **mock safety** tests in `api.test.ts`, including the
-assertion that `fetch` is never called, and the counterpart test that turning
-mocking *off* still reaches the real service.
+And on the server side there is now a third, which is the strongest of them:
+with `MOCK_UPSTREAM` on — the default — `callUpstream` returns before it builds
+a URL, so there is no `fetch` call in the process at all. Not a refused request,
+not a request to the wrong host: no code path from this machine to the
+government service exists.
 
-> If you see *Bloqueado* in the report, mocking is on and an endpoint points
-> somewhere other than this origin. Either use a relative URL or set
-> `VITE_USE_MOCK=false` — deliberately.
+> If you see *Bloqueado* in the report, an endpoint in `endpoints.ts` points
+> somewhere other than this origin. That is a bug in the table, not a
+> configuration problem.
 
 ### The mock backend
 
@@ -651,17 +697,12 @@ the same.
 `src/lib/api.ts` therefore issues its real `fetch` calls unchanged — the code
 exercised against mocks is the code that ships.
 
-> **Why not MSW's browser worker?** It cannot work on the phone. The dev
-> server's self-signed certificate covers only `localhost` and `127.0.0.1`, so
-> a phone on the LAN IP always hits a certificate error. You can click through
-> the interstitial and the page loads — but browsers **refuse to register a
-> service worker on an origin with a certificate error**, bypassed or not,
-> because a service worker is persistent code. Serving the routes from the dev
-> server sidesteps this entirely and needs nothing installed on the phone.
->
-> MSW is still the mocking layer for the **test suite**. Both it and the
-> middleware drive the same behaviour in
-> [`src/mocks/scenario.ts`](src/mocks/scenario.ts), so they cannot drift apart.
+> **Why not a service worker?** It cannot work on the phone. Browsers **refuse
+> to register a service worker on an origin with a certificate error**, bypassed
+> or not, because a service worker is persistent code — and until the local CA
+> is installed, that is exactly what a phone sees. Serving the routes from the
+> dev server sidesteps this entirely and needs nothing installed on the phone.
+
 
 Failures are deterministic, keyed on the **last two digits** of the number, so
 you can reproduce any path on demand:
@@ -702,127 +743,296 @@ production build.
 
 ---
 
-## Wiring up the real API
+## The DTO boundary
 
-1. Set `VITE_USE_MOCK=false`, `VITE_API_URL` and `VITE_AUTH_TOKEN` in
-   `.env.local`.
-2. Uncomment the `server.proxy` block in [vite.config.ts](vite.config.ts) and
-   point `target` at the real host. Proxying server-side avoids CORS — in which
-   case leave `VITE_API_URL` empty so the app calls its own origin.
+**Read this before changing anything in `server/`.**
 
-Two things to check against the real service:
+The Mais Cidadão service answers a protocol lookup with the citizen's whole
+record: full name, CPF, SUS card number, mobile number, and a nested street /
+neighbourhood / district address. **None of that may cross from `server/` into
+`src/`.** The computer running the API is the boundary. The operator is standing
+there holding the paper — the person's details are already in their hand, and
+putting them in a browser puts them in that phone's DevTools and its disk cache
+as well.
 
-- **The ID field.** `readId` in [src/lib/api.ts](src/lib/api.ts) currently
-  accepts `id`, `Id`, `ID`, `protocolId`, `idProtocolo`, or a bare
-  string/number body. Narrow it once the real shape is known.
-- **The routes.** Paths and methods are in
-  [src/lib/endpoints.ts](src/lib/endpoints.ts) — the lookup is `GET`, both
-  submissions are `PUT`; see [Methods](#methods) for switching one and giving it
-  a body.
+### Where the boundary lives
 
-The bearer token needs nothing beyond the variable — it is attached to all three
-requests already.
+Two files, and only two:
+
+| file | what it lets through |
+| --- | --- |
+| [server/protocolo/protocolo.dto.ts](server/protocolo/protocolo.dto.ts) | `id`, `numprotocolo`, `data` |
+| [server/auth/auth.dto.ts](server/auth/auth.dto.ts) | `nome`, `nivel_permissao`, `podeProtocolar`, `token` |
+
+An upstream field reaches a browser **only** if it is written out literally in
+one of those. That is the whole mechanism.
+
+`podeProtocolar` is worth a note: it is a boolean the server derives from the
+upstream `permissoes` array precisely so that array — eighteen entries
+describing every screen of a system this app is not — never has to leave.
+Deriving beats forwarding whenever the client only needs a yes or no.
+
+### Whitelist, never blocklist
+
+Build the outgoing object field by field. Do **not** take the upstream object
+and delete the sensitive keys.
+
+```ts
+// ✅ Whitelist. A new upstream field simply does not appear.
+return { id: String(p.id ?? ''), numprotocolo: String(p.numprotocolo ?? ''), data: String(p.data ?? '') }
+
+// ❌ Blocklist. Works today; leaks in silence the day upstream adds
+//    `cpf_responsavel`, or renames `Pessoa` to `Requerente`.
+const dto = { ...upstream }
+delete dto.cpf
+```
+
+And forwarding the raw object while "just not showing it in the UI" is not a
+filter at all. It is in the network tab, in the JavaScript heap, and in
+`localStorage` if anything caches it.
+
+### How to check it
+
+There is no test enforcing this. There was one, and it was removed along with
+the rest of the suite — so this is now a rule people keep, not a rule the
+repository keeps for them. Which makes checking it by hand worth the thirty
+seconds.
+
+The mock is built for exactly this. `server/shared/mock-upstream.ts` answers
+with a **full upstream-shaped payload** — invented CPF, SUS card, phone number
+and address — so the DTOs run for real against data that must not get through:
+
+```bash
+pnpm start          # mocked by default; nothing leaves the machine
+
+TOKEN=$(curl -sk -X POST https://localhost:4173/api/auth/login \
+  -H 'content-type: application/json' -d '{"email":"x","senha":"y"}' \
+  | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+
+curl -sk 'https://localhost:4173/api/protocolos?protocoloId=202601300217719' \
+  -H "authorization: Bearer $TOKEN"
+```
+
+That must print **exactly**:
+
+```json
+{"id":"217719","numprotocolo":"202601300217719","data":"2026-08-26"}
+```
+
+Three keys. If you see a fourth, or any of `cpf`, `sus`, `nomecompleto`,
+`celular01`, `Pessoa`, `Logradouro` or `pessoa_id`, the boundary is broken —
+and the fixture proves it, because those values were in the payload the DTO
+was handed.
+
+Widening the whitelist is a deliberate decision. Make it deliberately: change
+the DTO, run the above, and look at what comes out.
+
+### The sibling rule: logs
+
+The DTOs keep the citizen's record out of the browser. A `console.log(body)`
+added while debugging puts the identical payload into a terminal scrollback or a
+log file, which is the same leak by another route.
+
+Log the method, the path, the status and the duration. Never the upstream body,
+never the `Authorization` header. There is a comment saying so at the exact line
+in [server/shared/upstream.ts](server/shared/upstream.ts) where someone will
+want to add that log at one in the morning.
+
+### Why the API exists at all
+
+Before it, the app called the government service straight from the browser with
+a token compiled into the bundle. That was three problems at once: the service's
+CORS policy was not ours to change, the token was identical for everyone and
+readable by anyone with the app, and the raw response — CPF and all — arrived
+whole in the browser.
+
+Putting a local Express server in front fixed all three, because CORS is a
+*browser* policy and Node's `fetch` is not subject to it. Restoring a direct
+call from the frontend would undo every part of that at once.
 
 ---
 
-## Testing
+## Running the server
 
-Everything below is meant to be followed literally, start to finish, with no
-prior knowledge of the codebase. Nothing here needs a real backend, a real
-protocol number, or a phone unless a step says so.
-
-### 1. The automated suite
+One process serves both the app and the API, on **one port**, so a phone has a
+single origin to talk to — no CORS, no mixed content, and one certificate to
+trust instead of two.
 
 ```bash
-pnpm install     # or: npm install
-pnpm test        # or: npm test
+pnpm cert          # once per machine, and again if its LAN IP changes
+pnpm start         # build, then https://localhost:4173 and https://<lan-ip>:4173
 ```
 
-Expect **236 passed**. That is the whole check — if it is green, the logic is
-behaving. Other ways to run it:
+### Which machine is allowed to file real protocols
+
+Exactly one: the Windows box physically at the site. Everywhere else — including
+whatever you develop on — the server runs **mocked**, and that is the default
+rather than something to remember.
+
+Mocked means what it says: `callUpstream` returns before it builds a URL, so
+there is no code path from the process to the government service at all. Not a
+refused request; no request. Permission to call that service belongs to a place
+and a person, not to whoever has the repository checked out, and "I just ran it
+to see if it worked" must not be able to file a protocol against a real
+citizen's record.
+
+So the banner says which mode it is in, every time:
+
+```
+  ✓  MODO SIMULADO — nenhuma requisição sai desta máquina.
+```
+
+```
+  ⚠  SUBMISSÕES REAIS → https://o-servico-real
+     Cada protocolo enviado é definitivo. Não há desfazer.
+```
+
+`GET /api/health` answers the same question — `{"ok":true,"mock":true,...}` —
+so you can check from a phone rather than by reading a terminal.
+
+Turning it off is one line in the deployment machine's `.env`, and the server
+then **refuses to boot** without an explicit `UPSTREAM_URL`. The full procedure
+is **[docs/WINDOWS.md](docs/WINDOWS.md)**.
+
+> This replaced what `VITE_USE_MOCK` used to guarantee. The client forced its
+> base URL to its own origin while mocking, so it physically could not reach a
+> live service. Now every call is a relative `/api` path, so that question moved
+> to the server — and had to be answered there just as firmly.
+
+### Where the settings live
+
+One `.env`, and the prefix is the boundary: `VITE_*` reaches the browser,
+everything else stays in `server/`. `UPSTREAM_URL` deliberately has no prefix,
+so it is never inlined into anything a phone downloads —
+`pnpm build && grep -ri upstream dist/` returns nothing, and that is the
+property rather than a habit. Full table in [Configuration](#configuration).
+
+### Developing
+
+Mocked, which is the default and needs no server at all:
 
 ```bash
-pnpm test:watch                        # re-runs on save
-pnpm test:ui                           # browser UI, good for reading failures
-pnpm vitest run src/lib/api.test.ts    # a single file
-pnpm vitest run -t "the AS rule"       # tests whose name matches
-pnpm vitest run --reporter=verbose     # print every test name
+pnpm dev           # https://localhost:5173, plugins/mock-api.ts answers /api
 ```
 
-> **The suite does not read your `.env`, and never touches the network.**
-> Its environment is fixed in [vitest.config.ts](vitest.config.ts) under
-> `test.env` — relative endpoints, mocking on, no token — and MSW answers every
-> request. This is deliberate: Vite loads `.env` during tests too, so without it
-> the suite would pass or fail depending on whichever endpoints each developer
-> happened to have configured. If you need to test different values, stub them
-> in the test (`vi.stubEnv`), as the `bearer token` block in `api.test.ts` does
-> — do not edit your `.env` to make a test pass.
-
-Any request nobody wrote a handler for makes the suite **fail loudly** rather
-than escape to the real network (`onUnhandledRequest: 'error'` in
-[src/test/setup.ts](src/test/setup.ts)). A test that suddenly errors about an
-unhandled request usually means the code started calling something new.
-
-### 2. Running the app against the mock backend
-
-This is how to exercise the whole flow by hand without touching a live service.
+Against the Express server — still mocked upstream, but exercising the server's
+real DTOs, selection logic and status mapping — two terminals:
 
 ```bash
-cp .env.example .env.local     # only if you have no .env.local yet
-pnpm dev
+pnpm server:watch                 # terminal 1 — restarts on change
+VITE_USE_MOCK=false pnpm dev      # terminal 2 — proxies /api to it
 ```
 
-`.env.local` overrides `.env` and is git-ignored. Leave `VITE_USE_MOCK` at
-`true` — **mocking is what keeps you from firing real submissions at a
-government service.** Confirm it is on: the three endpoints answer as JSON.
+With `VITE_USE_MOCK=false`, [vite.config.ts](vite.config.ts) forwards `/api` to
+the server rather than letting the browser call it directly, so there is still
+exactly one origin in play. The two browser-side mechanisms are mutually
+exclusive by construction — the proxy only exists when `useMock` is false.
+
+Note that `VITE_USE_MOCK` and `MOCK_UPSTREAM` are different switches and both
+default to on. The first decides whether the *browser* talks to a real server;
+the second decides whether the *server* talks to the real government service.
+Turning the first off is routine. Turning the second off is not.
+
+`pnpm preview` now serves on **4174**, not 4173 — 4173 belongs to `pnpm server`,
+which is what a phone connects to.
+
+### On Windows
+
+The deployment machine is Windows, and three things there are not the same:
+
+- **Env-var prefixes do not work.** `HTTPS=false pnpm server` means nothing in
+  cmd or PowerShell, so the switch is a flag: `pnpm server:http`.
+- **openssl is not on PATH.** `pnpm cert` looks inside Git for Windows, which
+  bundles one, so installing Git is enough.
+- **The firewall blocks port 4173 inbound by default**, silently — the server
+  starts, localhost works, and no phone can connect. One `netsh` command fixes
+  it.
+
+All three are covered in [docs/WINDOWS.md](docs/WINDOWS.md), along with keeping
+the server running across reboots.
+
+### On a phone
+
+The certificate has to be trusted first. Android will let you click through;
+**iPhone will not**, and needs a specific two-step install that is easy to get
+half-right — see **[docs/IPHONE.md](docs/IPHONE.md)**.
+
+One thing that catches everyone: `pnpm cert` bakes the machine's LAN IP into the
+certificate's SAN at the moment it runs. Change network, or get a different
+address from DHCP, and the certificate no longer matches:
 
 ```bash
-curl -k "https://localhost:5173/protocolo?protocoloId=202601300217719"
-# {"id":"PRT-217719"}
+rm certs/dev-server.*   # keep certs/dev-ca.crt — reusing it keeps phones trusting you
+pnpm cert
 ```
 
-If that returns HTML instead of JSON, mocking is off — check `VITE_USE_MOCK`
-and **restart the dev server**, because [vite.config.ts](vite.config.ts) reads
-the environment once at startup.
+---
 
-### 3. Forcing each outcome on demand
+## Verifying a change
 
-The mock decides what to do from the **last two digits** of the number, so every
-path is reproducible. Write a slip by hand, or type the digits into the confirm
-sheet — you do not need a real document.
+There is **no automated test suite.** It was removed deliberately: this is a
+small tool with one operator and one deployment, and the suite was costing more
+in day-to-day friction than it was returning.
 
-| Use a number ending in | What happens | What you should see |
-| --- | --- | --- |
-| `19` (or anything unlisted) | everything succeeds | both rows under **Sucesso** |
-| `97` | the ID lookup fails (503) | record kept with **no ID**, refresh icon offered |
-| `98` | ordinary protocol fails | AS reported **não enviado**, and no AS request is sent |
-| `99` | protocol succeeds, AS fails (422) | one Sucesso row, one Falha row, same number |
+What replaced it is that the mock is good enough to exercise everything by hand,
+in a couple of minutes, without touching the real service. Do this before any
+deploy.
 
-Full numbers you can use directly:
+### 1. Run it
 
-```text
-202601300217719   everything works
-202601300217797   lookup fails
-202601300217798   protocol fails, AS must be skipped
-202601300217799   protocol works, AS fails
+```bash
+pnpm dev            # https://localhost:5173 — mock in the dev server
 ```
 
-Check the requests in **DevTools → Network**. The rules worth confirming with
-your own eyes:
+or, closer to what actually ships:
 
-- The lookup goes out as **GET** with `?protocoloId=`, right after you confirm a
-  scan — not when you press Protocolar.
-- Both submissions go out as **PUT**, to `/<id>` path segments.
-- Requests are **one at a time**, never in parallel.
-- On the `98` number, **no request to the AS endpoint appears at all**. This is
-  the invariant the whole app is built around: AS is never valid on its own.
+```bash
+pnpm start          # build + serve app and API together on 4173
+```
 
-### 4. Testing without paper, or without a phone
+Both are mocked by default, and `pnpm start` prints which mode it is in. **No
+request leaves the machine unless `MOCK_UPSTREAM=false`,** which belongs only on
+the deployment machine — see [docs/WINDOWS.md](docs/WINDOWS.md).
 
-The camera is the only part that needs real hardware. Two ways around it:
+`pnpm start` is the more useful of the two, because it runs the server's real
+code: the DTOs, the selection logic and the status mapping all execute against a
+full upstream-shaped payload, fake CPF and address included. Curl it and watch
+the boundary work:
 
-**Feed Chrome a video file instead of a camera.** Works on a desktop, with no
-phone and no printouts:
+```bash
+curl -k -X POST https://localhost:4173/api/auth/login \
+  -H 'content-type: application/json' -d '{"email":"x","senha":"y"}'
+# -> only { token, usuario: { nome, nivel_permissao, podeProtocolar } }
+
+curl -k 'https://localhost:4173/api/protocolos?protocoloId=202601300217719' \
+  -H 'authorization: Bearer <token>'
+# -> only { id, numprotocolo, data } — no cpf, no sus, no nomecompleto
+```
+
+### 2. Forcing each outcome on demand
+
+Failures are keyed on the **last two digits** of the number, so every path is
+reproducible without waiting for one to happen:
+
+| Number ends in | Behaviour |
+| --- | --- |
+| `97` | ID lookup fails — the record is kept without an ID |
+| `98` | ordinary protocol fails — AS must then be skipped |
+| `99` | ordinary protocol succeeds, AS fails |
+| anything else | everything succeeds |
+
+Both mocks use the same digits — the constants are exported from
+[src/mocks/scenario.ts](src/mocks/scenario.ts) and imported by
+[server/shared/mock-upstream.ts](server/shared/mock-upstream.ts), so a number
+that reproduces something in the browser reproduces it against the server too.
+
+With mocking on, a first visit also starts with a **sample history already in
+the list**, so you can press *Protocolar todos* immediately — no camera, no
+paper. The rows are chosen to hit each rule above exactly once.
+
+### 3. Without paper, or without a phone
+
+**Feed Chrome a video file instead of a camera:**
 
 ```bash
 google-chrome \
@@ -834,104 +1044,54 @@ google-chrome \
 
 The file must be **Y4M**; convert one with
 `ffmpeg -i slip.jpg -pix_fmt yuv420p slip.y4m`. There is a reference photo at
-[public/mock-image.jpeg](public/mock-image.jpeg) — the same WhatsApp-recompressed
-image the OCR figures were measured against.
+[public/mock-image.jpeg](public/mock-image.jpeg).
 
-**Skip the camera entirely.** Everything after the scan — history, editing, the
-queue, the AS rule, the report — is reachable by adding a record and correcting
-its number with the pencil icon. Correcting a number re-runs the lookup, so
-typing one of the numbers above is enough to drive any outcome.
+**Or skip the camera entirely.** Everything after the scan — history, editing,
+the queue, the AS rule, the report — is reachable by adding a record and
+correcting its number with the pencil icon. Correcting a number re-runs the
+lookup, so typing one of the numbers above drives any outcome.
 
-### 5. Manual smoke test
+### 4. The walkthrough
 
-Worth walking once before a release. Against mocks, on a phone:
+Worth doing once before a release, on a phone, against the mock:
 
-1. **Camera opens** over `https://<lan-ip>:5173` after accepting the warning.
-   On plain `http://` it must refuse with an explanation, not fail silently.
+1. **Camera opens** over `https://<lan-ip>:4173`. On plain `http://` it must
+   refuse with an explanation, not fail silently.
 2. **Aim box** drags onto the `Protocolo Nº` field, will not leave the guide,
    and is still where you left it after a reload.
 3. **A scan confirms** — phone vibrates, sheet shows the photo above the digits.
-4. **Tap the number** on the sheet and correct it; the record saves as edited.
-5. **"Protocolar também AS"** keeps its state into the next scan.
-6. **Duplicate** — scan the same slip twice; the second is blocked.
-7. **Protocolar todos** shows progress, and **Parar** actually stops it.
-8. **Report** lists every record under Sucesso or Falha with número · ID · motivo.
-9. **Copiar / CSV** produce the same rows the screen shows.
-10. **Retry** — press Protocolar todos again; already-successful records are
-    skipped and only the failures go out again.
-11. **Reload the page** — the history is still there.
+4. **The AS rule holds** — a `98` number reports AS as *não enviado*, and the AS
+   endpoint is never contacted.
+5. **Nothing is filed twice** — press *Protocolar todos* again; successful
+   records are skipped and only failures go out.
+6. **The history survives a reload.**
+7. **Log out and back in** — the history is still there. Logging out clears the
+   session and nothing else; wiping the history would make a half-finished stack
+   re-file every slip.
+8. **Turn the Wi-Fi off and reload** — the app comes back logged in, with the
+   history, rather than at a login screen it cannot pass.
 
-### 6. Checking against the real service
+### 5. Against the real service
 
-Only after the mock run is clean.
+Only on the authorised machine, and only after the above is clean. The full
+procedure is [docs/WINDOWS.md](docs/WINDOWS.md) § 6. In short: flip
+`MOCK_UPSTREAM=false`, confirm the banner changed to **SUBMISSÕES REAIS**, and
+start with **one** number you are willing to file for real. There is no undo.
 
-1. Set `VITE_USE_MOCK=false`, `VITE_API_URL` and `VITE_AUTH_TOKEN` in
-   `.env.local`.
-2. Start with **one** number you are willing to submit for real. There is no
-   undo, and the AS rule means a successful protocol cannot be taken back.
-3. Watch the Network tab for a `401` (token wrong or missing) or a CORS error
-   (needs the proxy in [vite.config.ts](vite.config.ts)).
+Two checks worth running there before anything else:
 
-### 7. Writing a new test
+```bash
+# The API's 404 must be JSON, not the HTML shell. This is what stops a mistyped
+# endpoint being reported as a filed protocol.
+curl -k -i https://localhost:4173/api/nao-existe
 
-Tests live next to what they cover, as `*.test.ts` / `*.test.tsx`. Two
-conventions matter, and both exist because of bugs this project actually hit:
-
-- **Register handlers with `http.all`, not `http.get`.** The verb for each call
-  lives in [src/lib/endpoints.ts](src/lib/endpoints.ts) and changes; a handler
-  pinned to `GET` silently stops matching and the request falls through to the
-  default mock, which usually answers `200` — so the test keeps passing while
-  asserting nothing. Pin verbs only in the dedicated **HTTP methods** block in
-  `api.test.ts`.
-- **Route from `ENDPOINTS`, never a hand-written path.** A literal in a test
-  drifts the moment a route changes, and drifts silently for the reason above.
-- **Compare resolved URLs, not pathnames.** With mocking off the base is
-  absolute, with it on the base is empty. Both test files define an `endpoint()`
-  helper that resolves a path the same way `api.ts` does; use it. And prefer an
-  exact match over `startsWith` — the AS path *begins with* the ordinary one's
-  (`…/protocolaragendamento` and `…/protocolaragendamentoas`), so a prefix test
-  cannot tell them apart.
+# And confirm on real data that nothing personal crosses.
+curl -k 'https://localhost:4173/api/protocolos?protocoloId=<15 digits>' \
+  -H 'authorization: Bearer <token>'
+```
 
 ---
 
-## Test coverage
-
-Vitest + Testing Library + MSW, 236 tests. Notable coverage:
-
-- **`protocol.test.ts`** — extraction against *verbatim OCR output* captured
-  from the reference photo, including the mangled `Nº`; label anchoring
-  preferring the labelled number over other long numbers on the page.
-- **`queue.test.ts`** — the AS rule: AS never precedes the ordinary protocol,
-  never fires when it fails, never fires without an ID; strict one-at-a-time
-  sequencing verified by counting concurrent in-flight requests. Plus **never
-  files the same protocol twice**, driving the exact states an interrupted or
-  AS-only run leaves behind.
-- **`seed.test.ts`** — the mocked starting history covers each deterministic
-  outcome once, survives a deliberate clear, and keeps its already-filed row out
-  of the queue.
-- **`preprocess.test.ts`** — the `object-fit: cover` coordinate mapping, for
-  both the scan box and the tap-to-focus point, including that the two agree at
-  the same on-screen spot; and a guard that the scan region stays large (a
-  regression here silently reproduces the focus-blur bug).
-- **`api.test.ts`** — ID field variants, error mapping, URL construction; the
-  bearer token on all three calls and its absence when unconfigured; the exact
-  verb each call uses (GET lookup, PUT submissions), which is the guard on a
-  one-word edit reaching production.
-- **`sw.test.ts`** — the service worker's caching allowlist, run against
-  stand-in globals: that no submission and no lookup is ever cached, and that
-  the build output and the Tesseract runtime are.
-- **`api.test.ts`, older Safari** — the suite deletes `AbortSignal.any` and
-  `AbortSignal.timeout` to emulate an iPhone below iOS 17.4, and asserts that
-  cancels and timeouts still arrive distinguishable from each other. Without the
-  fallbacks every request threw before leaving the app.
-- **`storage.test.ts`** — migration of records written by older versions; the
-  aim box surviving a corrupt or out-of-bounds saved value.
-- **`ScannerView.test.tsx`** — the aim box goes where it is dragged, stays
-  inside the guide, and tells a tap apart from a drag.
-- **`ConfirmSheet.test.tsx`** — the human safety net: photo present, duplicates
-  blocked, corrections reported as edited.
-
----
 
 ## How accurate is the OCR?
 
@@ -998,15 +1158,19 @@ src/
     preprocess.ts    guide + aim box, ROI → intrinsic-pixel mapping, crop
     ocr.ts           Tesseract worker lifecycle
     consensus.ts     multi-frame voting (the misread defence)
-    api.ts           the three backend calls (GET lookup, PUT submissions)
+    api.ts           the four backend calls (login, lookup, two submissions)
     queue.ts         sequential run + the AS rule
     storage.ts       localStorage history + migration
-    config.ts        env-driven settings (base URL, token, timeout)
+    session.ts       localStorage session, JWT expiry, the logout rule
+    config.ts        env-driven settings (mock flag, timeout)
     endpoints.ts     the route table: path + method per call
   hooks/
     useCamera.ts     getUserMedia, torch, tap-to-focus, teardown
     useScanner.ts    the scan loop
   components/
+    AuthGate.tsx     login screen or app — wraps App, from main.tsx
+    LoginScreen.tsx  usuário + senha
+    UserChip.tsx     "Usuário: Heitor · Atendente" + logout
     Dashboard.tsx    home: stats, history, actions
     ScannerView.tsx  full-screen camera + document guide
     ConfirmSheet.tsx photo-vs-digits confirmation
@@ -1014,12 +1178,33 @@ src/
     ResultsPanel.tsx
     ui/              shadcn/ui primitives
   mocks/
-    scenario.ts      what the mock backend does (shared)
-    handlers.ts      MSW handlers for tests
-    server.ts        MSW node server
-  test/
-    setup.ts         MSW lifecycle for the suite
-    sw.test.ts       the service worker's caching rules
+    scenario.ts      what the browser-facing mock does; the failure digits
+    seed.ts          the sample history, so a first visit has something to run
+server/              the API, and the server that serves the built app
+  index.ts           boot: certificate, http|https, listen, the upstream banner
+  app.ts             the Express app — the middleware ORDER lives here
+  config.ts          .env, validated once; refuses to boot without UPSTREAM_URL
+  api.routes.ts      the /api router, /api/health, and the terminal JSON 404
+  auth/
+    auth.routes.ts   POST /login
+    auth.controller.ts
+    auth.service.ts  POST {UPSTREAM}/usuario/login
+    auth.dto.ts      ⚠ the login whitelist — see "The DTO boundary"
+  protocolo/
+    protocolo.routes.ts
+    protocolo.controller.ts
+    protocolo.service.ts   the three Mais Cidadão calls
+    protocolo.dto.ts       ⚠ the protocol whitelist — id, numprotocolo, data
+    protocolo.select.ts    picking one row out of a LIKE-style result set
+  shared/
+    upstream.ts      the ONE call to Mais Cidadão; status mapping; no logging
+    mock-upstream.ts stands in for it — the DEFAULT, so nothing leaves by accident
+    message.ts       readDetail() for upstream error bodies
+    cert.ts          reads certs/ from Node (twin of plugins/dev-cert.ts)
+    static.ts        dist/, cache headers, SPA fallback, /dev-ca.crt
+docs/
+  WINDOWS.md         setting up the deployment machine, step by step
+  IPHONE.md          trusting the certificate on iOS, for the end user
 plugins/
   mock-api.ts        serves the mock API from the dev server
   dev-cert.ts        loads the dev certificate, serves the CA at /dev-ca.crt
@@ -1035,7 +1220,7 @@ certs/               generated by `pnpm cert`, git-ignored — never commit
 ```
 
 Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui (Radix),
-Tesseract.js, MSW, Vitest.
+Tesseract.js, Express 5.
 
 ---
 
@@ -1043,18 +1228,24 @@ Tesseract.js, MSW, Vitest.
 
 | | |
 | --- | --- |
-| `pnpm dev` | LAN dev server over HTTPS |
+| `pnpm start` | **build, then serve app + API on 4173** — what a phone connects to. Runs `tsc`/`vite`/`tsx` directly, so it needs neither pnpm nor npm to be the one driving |
+| `pnpm server` | serve app + API without rebuilding first |
+| `pnpm server:watch` | same, restarting on change, for working on `server/` |
+| `pnpm dev` | LAN dev server over HTTPS on 5173, mock API included |
 | `pnpm cert` | issue a dev certificate covering this machine's LAN address, so a phone can install the PWA |
-| `pnpm build` | typecheck + production build |
-| `pnpm preview` | serve the build over HTTPS, for LAN/phone testing |
-| `pnpm preview:pwa` | serve the build over HTTP on localhost, where the service worker can register |
-| `pnpm test` | run the test suite |
-| `pnpm test:watch` / `pnpm test:ui` | watch mode / browser UI |
+| `pnpm build` | typecheck (app **and** `server/`) + production build |
+| `pnpm server:http` | same as `pnpm server` with TLS off — `http://localhost:4173` is a secure context, so the service worker registers there |
+| `pnpm preview` | serve the build over HTTPS on **4174** — 4173 belongs to `pnpm server` |
 | `pnpm lint` | oxlint |
 | `pnpm lock:npm` | regenerate `package-lock.json` from `package.json` |
 
 Every one of these runs under npm too, as `npm run <name>` (`npm test` and
 `npm install` need no `run`).
+
+> `tsx`, which runs the server's TypeScript, is a **devDependency** while
+> `pnpm server` needs it at runtime. That is fine on the machine this is
+> operated from — which is the only place it runs — but it would break a
+> `--prod` install.
 
 ### pnpm or npm
 
@@ -1151,26 +1342,46 @@ cause is a bad `path` in [src/lib/endpoints.ts](src/lib/endpoints.ts): a
 protocol-relative `//host/x` looks like a path but resolves to another host.
 See [Mocking cannot be half-on](#mocking-cannot-be-half-on).
 
-**Mocking is on but real protocols were filed.** Fixed — that combination is now
-unreachable: while mocking, the base URL is forced to the app's own origin
-whatever `.env` says. If you are on an older build, the cause is absolute URLs
-in `.env`, which bypass the dev server entirely so the mock never sees the
-request. Restart the dev server after updating.
+**Mocking is on but real protocols were filed.** Not reachable by configuration
+any more: every call is a same-origin relative path, so there is no host to point
+at a live service. What decides now is *which process you started* — `pnpm dev`
+mocks, `pnpm server` is real, and the server prints
+`⚠ SUBMISSÕES REAIS → …` on every start. `curl -k https://localhost:4173/api/health`
+answers the same question from anywhere on the network.
 
-**Against a real host, everything fails with "sem ID".** The lookup endpoint is
-unreachable. Check `VITE_API_URL` and that the proxy in `vite.config.ts` is
-uncommented and pointed at the right target.
+**Against a real host, everything fails with "sem ID".** Check, in order:
+`pnpm server` is running; `UPSTREAM_URL` in `.env` is right (the boot banner
+prints it); and you are logged in — an expired session shows as *Sessão expirada*
+and stops the run on the first slip rather than the last.
 
-**The tests fail after I changed an HTTP method.** Expected — update the **HTTP
-methods** block in `api.test.ts` to the verbs you now send. That test exists to
-make this deliberate. If instead the failures are `expected null to be …`, a
-handler somewhere is pinned to `http.get` and no longer matches; switch it to
-`http.all`.
+**Every submission reports success but nothing was filed.** The `/api` router's
+terminal 404 has been removed or shadowed, so unmatched API paths fall through to
+the SPA fallback and answer `200` with `index.html`. Check with
+`curl -k -i https://localhost:4173/api/nao-existe` — it must be a JSON 404. See
+[The DTO boundary](#the-dto-boundary) and `server/api.routes.ts`.
 
-**A test passes locally and fails for someone else, or vice versa.** The suite
-fixes its own environment in `vitest.config.ts`, so this should not happen from
-`.env` drift any more. If it does, check the test is not reading `import.meta.env`
-directly instead of stubbing it.
+**A phone shows a certificate warning that used to be gone.** The machine's LAN
+IP changed; it is baked into the certificate's SAN when `pnpm cert` runs. Delete
+`certs/dev-server.*` — **not** `certs/dev-ca.crt` — and re-run `pnpm cert`.
+Reusing the CA means no phone has to be set up again.
+
+**Everything 404s after I changed an HTTP method.** Express polices the verb,
+unlike both mocks. Change it in [src/lib/endpoints.ts](src/lib/endpoints.ts) and
+in [server/api.routes.ts](server/api.routes.ts) together, or the request falls
+through to the `/api` router's terminal 404.
+
+**The server says MODO SIMULADO when it should be filing for real.** The `.env`
+was not read, or `MOCK_UPSTREAM` is not exactly `false`. Better this way round
+than the other, but fix it before assuming anything was submitted — see
+[docs/WINDOWS.md](docs/WINDOWS.md) § 6.
+
+**No phone can reach the server, but `localhost` works.** On Windows, the
+firewall blocks 4173 inbound by default and says nothing. See
+[docs/WINDOWS.md](docs/WINDOWS.md) § 4.
+
+**`openssl was not found` on Windows.** Install
+[Git for Windows](https://git-scm.com/download/win); `pnpm cert` looks for the
+openssl it bundles.
 
 **pnpm fails to install, or corepack errors out.** Use npm instead — `npm
 install`, then `npm run dev`. Both are supported and both lockfiles are

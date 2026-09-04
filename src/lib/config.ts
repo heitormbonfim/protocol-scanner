@@ -3,11 +3,14 @@
  *
  * See `.env.example` for the full list. Vite only exposes variables prefixed
  * with `VITE_`, and inlines them at build time — so a production build carries
- * whatever was set when it was built, not when it runs.
+ * whatever was set when it was built, not when it runs. That prefix is also the
+ * boundary: the server's own settings (`UPSTREAM_URL` above all) deliberately
+ * carry no prefix and never reach this file.
  *
- * There is **one** URL here, not three: every call goes to the same service.
- * What differs between them is the path and the method, and those live in
- * `endpoints.ts` as code.
+ * There is **no** URL here any more. Every call is a same-origin relative path
+ * answered by the Express server in `server/`, which serves this very build —
+ * see `endpoints.ts`. And there is no token: it comes from a login now, and
+ * lives in `session.ts`.
  */
 
 /**
@@ -15,43 +18,37 @@
  *
  * Defaults to **on**: a fresh clone should run against mocks rather than
  * firing real submissions at a live service because someone forgot to create
- * a `.env`. Set `VITE_USE_MOCK=false` to talk to the real endpoints.
+ * a `.env`. Set `VITE_USE_MOCK=false` to talk to the Express server, which
+ * talks to the real endpoints.
  */
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 
 /**
- * The API's base URL — scheme and host, no trailing slash, no path.
+ * The API's base URL — empty, always, and kept as a tripwire.
  *
- * While mocking this is forced to `''`, which makes every call resolve against
- * the app's own origin. That is where the mock is listening: the dev server
- * itself in the browser, MSW under test.
+ * Every call resolves against the app's own origin, because the server in
+ * `server/` serves the app and the API from one port. That is what removed
+ * CORS and mixed content from the problem, and it is why there is nothing to
+ * configure per machine.
  *
- * The forcing is a safety property, not a convenience. A mock can only
- * intercept a request that actually reaches it. Point the app at the real
- * service, leave mocking on, and the browser would send genuine submissions to
- * a live government service while the developer believes nothing is going out —
- * and a submission cannot be taken back. Deriving the base from `USE_MOCK`
- * makes that state unreachable instead of merely discouraged.
+ * It stays here rather than being deleted because `request` in `api.ts` still
+ * refuses any cross-origin URL while mocking. That guard used to be what made
+ * "mocking is all-or-nothing" true; now it is a backstop, and the real
+ * safeguard has moved to the server, which refuses to boot without an explicit
+ * `UPSTREAM_URL` and prints what it is pointed at on every start. Removing both
+ * would be the tempting cleanup that leaves nothing at all.
  */
-export const API_URL = USE_MOCK
-  ? ""
-  : (import.meta.env.VITE_API_URL ?? "").trim().replace(/\/+$/, "");
-
-/** Per-request timeout. Applied to every call by `request` in `api.ts`. */
-export const REQUEST_TIMEOUT_MS = Number(
-  import.meta.env.VITE_REQUEST_TIMEOUT_MS ?? 5_000,
-);
+export const API_URL = "";
 
 /**
- * Bearer token, sent as `Authorization: Bearer <token>` on every request.
+ * Per-request timeout. Applied to every call by `request` in `api.ts`.
  *
- * Empty by default, and when it is empty no `Authorization` header is sent at
- * all — see `authHeaders` in `api.ts`.
- *
- * Note this is **not** a secret once built: Vite inlines it into the bundle, so
- * anyone with the app can read it. That is acceptable for a token issued to
- * this app on a controlled device. If the token must not leave the server,
- * attach it in the dev proxy (`vite.config.ts`) or whatever fronts the app in
- * production, and leave this unset.
+ * Generous, because it now covers the whole chain — phone → Express → Mais
+ * Cidadão — rather than a single hop. Deliberately **longer** than the
+ * server's own `UPSTREAM_TIMEOUT_MS`, so the server is always the one to give
+ * up first and the phone gets a definite answer instead of never learning
+ * whether a submission landed.
  */
-export const AUTH_TOKEN = (import.meta.env.VITE_AUTH_TOKEN ?? "").trim();
+export const REQUEST_TIMEOUT_MS = Number(
+  import.meta.env.VITE_REQUEST_TIMEOUT_MS ?? 25_000,
+);

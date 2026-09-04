@@ -51,23 +51,67 @@ const SERVER_CRT = resolve(CERT_DIR, "dev-server.crt");
 const SERVER_CSR = resolve(CERT_DIR, "dev-server.csr");
 const SERVER_EXT = resolve(CERT_DIR, "dev-server.ext");
 
+/**
+ * Where to find openssl.
+ *
+ * On Linux and macOS it is on PATH and there is nothing to think about. On
+ * Windows it usually is **not** — but Git for Windows ships one, and this
+ * project's deployment machine is a Windows box that will certainly have Git
+ * installed. Looking there turns "openssl is not recognized as an internal or
+ * external command" into a certificate, without asking anyone to install
+ * anything or edit a PATH.
+ *
+ * `where`/`which` is not used: PATH is tried first anyway by execFileSync, and
+ * the fallbacks are cheap to test directly.
+ */
+const OPENSSL_CANDIDATES = [
+  "openssl",
+  ...(process.platform === "win32"
+    ? [
+        // Git for Windows, 64- and 32-bit install locations.
+        "C:/Program Files/Git/usr/bin/openssl.exe",
+        "C:/Program Files (x86)/Git/usr/bin/openssl.exe",
+        // Git installed per-user, which is the default the installer offers.
+        resolve(process.env.LOCALAPPDATA ?? "", "Programs/Git/usr/bin/openssl.exe"),
+        // Chocolatey and the Win32/Win64 OpenSSL installers.
+        "C:/Program Files/OpenSSL-Win64/bin/openssl.exe",
+        "C:/ProgramData/chocolatey/bin/openssl.exe",
+      ]
+    : []),
+];
+
+/** Resolved once by `requireOpenssl`, then reused by every call. */
+let opensslPath = null;
+
 function openssl(args) {
-  return execFileSync("openssl", args, {
+  return execFileSync(opensslPath ?? "openssl", args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
 function requireOpenssl() {
-  try {
-    openssl(["version"]);
-  } catch {
-    console.error(
-      "\n  openssl is required and was not found on PATH.\n" +
-        "  Debian/Ubuntu:  sudo apt install openssl\n" +
-        "  macOS:          brew install openssl\n",
-    );
-    process.exit(1);
+  for (const candidate of OPENSSL_CANDIDATES) {
+    // A bare "openssl" is resolved through PATH by execFileSync; an absolute
+    // path has to exist first, or the error is about the file rather than
+    // about openssl being unusable.
+    if (candidate !== "openssl" && (!candidate || !existsSync(candidate))) continue;
+    try {
+      opensslPath = candidate;
+      openssl(["version"]);
+      return;
+    } catch {
+      opensslPath = null;
+    }
   }
+
+  console.error(
+    "\n  openssl is required and was not found.\n\n" +
+      "  Windows:        install Git for Windows — it bundles openssl, and this\n" +
+      "                  script looks for it there. https://git-scm.com/download/win\n" +
+      "  Debian/Ubuntu:  sudo apt install openssl\n" +
+      "  macOS:          brew install openssl\n",
+  );
+  process.exit(1);
 }
 
 /** Every non-internal IPv4 address this machine answers on. */

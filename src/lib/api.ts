@@ -1,28 +1,26 @@
 import type { LookupResult, ProtocolResult } from "../types";
-import {
-  API_URL,
-  AUTH_TOKEN,
-  REQUEST_TIMEOUT_MS,
-  USE_MOCK,
-} from "./config";
+import type { Session } from "./session";
+import { API_URL, REQUEST_TIMEOUT_MS, USE_MOCK } from "./config";
 import { ENDPOINTS, type Endpoint } from "./endpoints";
 
 /**
- * The three backend calls.
+ * The four backend calls.
  *
- * 1. `lookupProtocolId` runs the moment the user confirms a scan, turning the
+ * 1. `login` exchanges a username and password for a session.
+ * 2. `lookupProtocolId` runs the moment the user confirms a scan, turning the
  *    15-digit number into the id the other two calls need.
- * 2. `protocolById` submits the ordinary protocol.
- * 3. `protocolAsById` submits the AS protocol.
+ * 3. `protocolById` submits the ordinary protocol.
+ * 4. `protocolAsById` submits the AS protocol.
  *
- * Each is three lines, because all the work is in `request` below — the only
- * place in the app that touches `fetch`. It builds the URL, attaches the bearer
- * token, applies the timeout, and turns every failure — HTTP status, network,
- * timeout, abort — into a returned value instead of a thrown error. Nothing
- * above this module ever writes a try/catch.
+ * Each is a handful of lines, because all the work is in `request` below — the
+ * only place in the app that touches `fetch`. It builds the URL, attaches the
+ * bearer token, applies the timeout, and turns every failure — HTTP status,
+ * network, timeout, abort — into a returned value instead of a thrown error.
+ * Nothing above this module ever writes a try/catch.
  *
- * Where each call goes is `endpoints.ts`; the host it goes to is `API_URL` in
- * `config.ts`. Nothing in this file knows a URL.
+ * Where each call goes is `endpoints.ts`. They are all same-origin relative
+ * paths answered by the Express server in `server/`, which also serves this
+ * build — so nothing here knows a host, and there is no CORS to dodge.
  *
  * There is no mock branch here: when mocking is enabled the dev server answers
  * these routes itself, so this module behaves identically whether it is talking
@@ -136,16 +134,63 @@ function withTimeout(signal?: AbortSignal): AbortSignal {
   return anySignal([signal, timeout]);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The session token
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The bearer token for every request, held in the module rather than passed in.
+ *
+ * That placement is deliberate. Threading a token through
+ * `protocolById(id, token, signal)` would push it through `runProtocolQueue`
+ * and every one of its callers, for a value that never varies within a run.
+ * Keeping it here leaves `queue.ts` — and its tests — untouched by the whole
+ * move from a build-time token to a login.
+ */
+let authToken: string | null = null;
+
+/**
+ * Set once the session is dead, so the rest of a batch fails without a round
+ * trip. Cleared by `setAuthToken`, which is the only way back in.
+ */
+let sessionExpired = false;
+
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setAuthToken(token: string): void {
+  authToken = token;
+  sessionExpired = false;
+}
+
+export function clearAuthToken(): void {
+  authToken = null;
+  sessionExpired = false;
+}
+
+/**
+ * Called the first time a request comes back 401.
+ *
+ * `App` uses it to abort the run in flight and drop to the login screen. One
+ * handler, replaced rather than accumulated, because there is only ever one
+ * app.
+ */
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
+/** The message a request refused before it was sent comes back with. */
+const EXPIRED = "Sessão expirada — entre novamente";
+
 /**
  * The bearer token, on every request.
  *
- * Omitted entirely when no token is configured, rather than sent empty: a bare
+ * Omitted entirely when there is none, rather than sent empty: a bare
  * `Authorization: Bearer` reads as a malformed credential, and services tend to
  * answer that with a 400 instead of the 401 that would actually tell you the
  * token is missing.
  */
 function authHeaders(): Record<string, string> {
-  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
 
 function describeError(error: unknown): string {
@@ -207,6 +252,20 @@ async function request(
   endpoint: Endpoint,
   { id, query, body, signal, failure }: CallOptions = {},
 ): Promise<RequestOutcome> {
+  /*
+   * Once the session is gone, stop going to the network.
+   *
+   * A run works through the stack one slip at a time. Expire at slip 87 of 200
+   * and, without this, the remaining 113 each make a full round trip to collect
+   * an identical 401 — a minute of waiting and 113 junk rows in the report, for
+   * a fact known at slip 87. `App` also aborts the run from `onUnauthorized`;
+   * this is the belt to that braces, and it is what makes the behaviour true
+   * for any caller rather than just the one that wired the callback up.
+   */
+  if (sessionExpired) {
+    return { ok: false, reason: EXPIRED, httpStatus: 401 };
+  }
+
   try {
     const url = buildUrl(endpoint, { id, query });
 
@@ -245,6 +304,19 @@ async function request(
     const text = await response.text().catch(() => "");
 
     if (!response.ok) {
+      /*
+       * 401 is the one status that means the session itself is over.
+       *
+       * Not 403: that is per-resource ("you may not touch this protocol"), and
+       * treating it as a dead session would log the operator out mid-batch over
+       * a single bad slip. The server keeps the two apart deliberately — see
+       * `mapStatus` in server/shared/upstream.ts.
+       */
+      if (response.status === 401 && !sessionExpired) {
+        sessionExpired = true;
+        unauthorizedHandler?.();
+      }
+
       const detail = readDetail(text);
       return {
         ok: false,
@@ -262,7 +334,76 @@ async function request(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Confirm-time lookup
+// 1. Login
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Exactly what `toSessionDto` in `server/auth/auth.dto.ts` returns. */
+export type LoginResult =
+  | { ok: true; session: Session }
+  | { ok: false; reason: string };
+
+/**
+ * Read a session out of the login response.
+ *
+ * Validated rather than cast: a 200 that is not a session — a proxy's HTML, a
+ * renamed field — would otherwise put the app past the login screen and then
+ * fail every request, which looks like a broken app rather than a failed login.
+ */
+function readSession(body: unknown): Session | null {
+  if (!body || typeof body !== "object") return null;
+  const payload = body as { token?: unknown; usuario?: unknown };
+
+  if (typeof payload.token !== "string" || !payload.token) return null;
+  if (!payload.usuario || typeof payload.usuario !== "object") return null;
+
+  const usuario = payload.usuario as Record<string, unknown>;
+  if (typeof usuario.nome !== "string") return null;
+
+  return {
+    token: payload.token,
+    usuario: {
+      nome: usuario.nome,
+      nivel_permissao:
+        typeof usuario.nivel_permissao === "string" ? usuario.nivel_permissao : "",
+      podeProtocolar: usuario.podeProtocolar === true,
+    },
+  };
+}
+
+/**
+ * Exchange a username and password for a session.
+ *
+ * The only call that does not carry a token, and the only one that produces
+ * one. On success the token is installed here, so the caller never has to
+ * remember to — forgetting would mean a login that appears to work and then
+ * 401s on the first scan.
+ */
+export async function login(
+  email: string,
+  senha: string,
+  signal?: AbortSignal,
+): Promise<LoginResult> {
+  // A previous session's expiry must not refuse the very request that would
+  // replace it.
+  sessionExpired = false;
+
+  const result = await request(ENDPOINTS.login, {
+    body: { email, senha },
+    signal,
+    failure: "falha no login",
+  });
+
+  if (!result.ok) return { ok: false, reason: result.reason };
+
+  const session = readSession(result.body);
+  if (!session) return { ok: false, reason: "Resposta de login inválida" };
+
+  setAuthToken(session.token);
+  return { ok: true, session };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. Confirm-time lookup
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -320,7 +461,7 @@ export async function lookupProtocolId(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2 & 3. The two submissions
+// 3 & 4. The two submissions
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function submit(
@@ -340,6 +481,25 @@ async function submit(
   if (!result.ok) {
     return { ok: false, reason: result.reason, httpStatus: result.httpStatus };
   }
+
+  /*
+   * A 2xx is not enough on its own.
+   *
+   * The API and the app are served from one origin now, so anything under
+   * `/api` that does not match a route would otherwise fall through to the SPA
+   * fallback and come back as **200 with index.html** — which this function
+   * would report as a filed protocol that never left the machine. The server's
+   * terminal 404 (`server/api.routes.ts`) is what prevents that; this is the
+   * second, independent check, on the side that would do the lying.
+   */
+  if (!result.body || typeof result.body !== "object") {
+    return {
+      ok: false,
+      reason: `${label}: resposta inesperada do servidor (HTTP ${result.status})`,
+      httpStatus: result.status,
+    };
+  }
+
   return { ok: true, reason: `${label} protocolado (HTTP ${result.status})` };
 }
 
