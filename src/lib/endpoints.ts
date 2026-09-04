@@ -12,26 +12,24 @@
  * API's contract. Keeping them here means they are typed, greppable, and
  * changed through a reviewable diff.
  *
- * Three consumers import this table, so they cannot disagree about where a call
+ * Two consumers import this table, so they cannot disagree about where a call
  * goes:
  *
- *   src/lib/api.ts           the real client
- *   plugins/mock-api.ts      the dev-server mock
- *   server/api.routes.ts     the Express API that answers them
+ *   src/lib/api.ts           the client
+ *   server/api.routes.ts     the Express API that answers it
  *
- * Only the last of those polices the HTTP method, so changing one here means
- * changing it there too.
+ * The server is the one that polices the HTTP method, so changing a verb here
+ * means changing it there too.
  *
  * Deliberately free of `import.meta.env`: `vite.config.ts` and the server pull
  * this in from Node, where that does not exist.
  *
  * ## The id is always the last segment
  *
- * `/protocolar/<id>`, never `/protocolos/<id>/protocolar`. `segmentAfter` in
- * `plugins/mock-api.ts` matches on exactly that shape, and the two paths below
- * are deliberately siblings rather than prefixes of one another
+ * `/protocolar/<id>`, never `/protocolos/<id>/protocolar`. The two submission
+ * paths below are deliberately siblings rather than prefixes of one another
  * (`protocolar-as` does not start with `protocolar/`, because `-` is not `/`),
- * so neither can shadow the other.
+ * so neither can shadow the other however they are matched.
  */
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

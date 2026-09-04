@@ -1,6 +1,5 @@
 import type { LookupResult, ProtocolResult } from "../types";
 import type { Session } from "./session";
-import { API_URL, REQUEST_TIMEOUT_MS, USE_MOCK } from "./config";
 import { ENDPOINTS, type Endpoint } from "./endpoints";
 
 /**
@@ -21,12 +20,19 @@ import { ENDPOINTS, type Endpoint } from "./endpoints";
  * Where each call goes is `endpoints.ts`. They are all same-origin relative
  * paths answered by the Express server in `server/`, which also serves this
  * build — so nothing here knows a host, and there is no CORS to dodge.
- *
- * There is no mock branch here: when mocking is enabled the dev server answers
- * these routes itself, so this module behaves identically whether it is talking
- * to a mock or to production. That is the point — the code under test is the
- * code that ships.
  */
+
+/**
+ * Per-request timeout.
+ *
+ * Generous, because it covers the whole chain — phone → Express → Mais Cidadão
+ * — rather than a single hop. Deliberately **longer** than the server's own
+ * `UPSTREAM_TIMEOUT_MS` (20s), so the server is always the one to give up first
+ * and the phone gets a definite answer instead of never learning whether a
+ * submission landed. A constant rather than a setting: the ordering between the
+ * two is the point, and two env vars could be set inconsistently.
+ */
+const REQUEST_TIMEOUT_MS = 25_000;
 
 type CallOptions = {
   /** Appended as a single encoded path segment: `{path}/{id}`. */
@@ -49,22 +55,23 @@ type RequestOutcome =
   | { ok: false; reason: string; httpStatus?: number };
 
 /**
- * The app's own origin, which is also where the mock listens.
+ * The app's own origin, which is also where the API lives — one Express process
+ * serves both.
  *
- * `fetch` outside a browser (jsdom under test, for one) rejects relative URLs
- * outright, so every URL has to be made absolute before the call.
+ * `fetch` rejects relative URLs outside a browser, and the guard in `request`
+ * needs an origin to compare, so every URL is made absolute before the call.
  */
 function appOrigin(): string {
   return globalThis.location?.origin ?? "http://localhost";
 }
 
-/** `{API_URL}{path}[/{id}][?query]`, absolute. */
+/** `{path}[/{id}][?query]`, resolved against this app's own origin. */
 function buildUrl(
   { path }: Endpoint,
   { id, query }: Pick<CallOptions, "id" | "query">,
 ): URL {
   const segment = id === undefined ? "" : `/${encodeURIComponent(id)}`;
-  const url = new URL(`${API_URL}${path}${segment}`, appOrigin());
+  const url = new URL(`${path}${segment}`, appOrigin());
 
   for (const [key, value] of Object.entries(query ?? {})) {
     url.searchParams.set(key, value);
@@ -270,20 +277,23 @@ async function request(
     const url = buildUrl(endpoint, { id, query });
 
     /*
-     * While mocking, nothing may leave this origin.
+     * Nothing may leave this origin, ever.
      *
-     * `API_URL` is already forced to '' when mocking, so this should be
-     * unreachable — but the failure it guards against is a real, irreversible
-     * submission to a live government service, and "should be unreachable" is
-     * not good enough for that. Refused before `fetch`, so nothing goes out,
-     * and returned rather than thrown so it surfaces in the report.
+     * Every path in `endpoints.ts` is relative, so this should be unreachable —
+     * but the failure it guards against is a real, irreversible submission to a
+     * live government service, and "should be unreachable" is not good enough
+     * for that. The realistic slip is a protocol-relative path: `//host/x`
+     * looks like a path and resolves to another host.
+     *
+     * Refused before `fetch`, so nothing goes out, and returned rather than
+     * thrown so it surfaces in the report instead of vanishing.
      */
-    if (USE_MOCK && url.origin !== appOrigin()) {
+    if (url.origin !== appOrigin()) {
       return {
         ok: false,
         reason:
-          `Bloqueado: VITE_USE_MOCK está ligado, mas ${url.origin} não é a ` +
-          `origem do app. Nada foi enviado.`,
+          `Bloqueado: ${url.origin} não é a origem do app. Nada foi enviado. ` +
+          `Confira o caminho em endpoints.ts.`,
       };
     }
 
@@ -442,8 +452,8 @@ export async function lookupProtocolId(
   signal?: AbortSignal,
 ): Promise<LookupResult> {
   const result = await request(ENDPOINTS.lookup, {
-    // If the service turns out to want a POST, this moves from `query` to
-    // `body` — the mock reads the number from either.
+    // If the API turns out to want a POST, this moves from `query` to `body`;
+    // `request` serialises either.
     query: { protocoloId: num },
     signal,
     failure: "falha na busca",

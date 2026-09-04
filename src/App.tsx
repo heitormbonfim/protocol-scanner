@@ -7,13 +7,11 @@ import { ScannerView } from '@/components/ScannerView'
 import { useCamera } from '@/hooks/useCamera'
 import { useScanner } from '@/hooks/useScanner'
 import { lookupProtocolId } from '@/lib/api'
-import { USE_MOCK } from '@/lib/config'
 import {
   pendingRecords,
   runProtocolQueue,
   type QueueProgress,
 } from '@/lib/queue'
-import { seedMockRecords } from '@/mocks/seed'
 import {
   clearRecords,
   loadFieldRoi,
@@ -41,15 +39,7 @@ type AppProps = {
 export default function App({ session, onLogout }: AppProps) {
   const [view, setView] = useState<View>('dashboard')
   const [scannerOpen, setScannerOpen] = useState(false)
-  /*
-   * With mocking on, start from a sample history rather than an empty one, so
-   * the queue and the report can be exercised without a camera or paper. Seeded
-   * once per browser and never while mocking is off — see mocks/seed.ts.
-   */
-  const [records, setRecords] = useState<ProtocolRecord[]>(() => {
-    const stored = loadRecords()
-    return USE_MOCK ? seedMockRecords(stored) : stored
-  })
+  const [records, setRecords] = useState<ProtocolRecord[]>(loadRecords)
   const [candidate, setCandidate] = useState<ScanCandidate | null>(null)
   const [editingNum, setEditingNum] = useState<string | null>(null)
   const [running, setRunning] = useState(false)

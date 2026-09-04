@@ -6,8 +6,8 @@ import { config } from "./config.ts";
 /**
  * Everything under `/api`, and the terminal 404 that closes it.
  *
- * The client's own copy of these paths is `src/lib/endpoints.ts`, which the two
- * mocks route on as well. Keep the two in step.
+ * The client's own copy of these paths is `src/lib/endpoints.ts`. Keep the two
+ * in step — and note this side is the one that polices the HTTP method.
  */
 export const apiRoutes = Router();
 
@@ -17,18 +17,10 @@ export const apiRoutes = Router();
  * The app never calls this. It exists for two reasons: `docs/IPHONE.md` opens
  * with a single `curl` against it, so nobody starts installing certificates to
  * fix what is really a server that is not running; and it makes the upstream
- * target visible, which matters now that "am I talking to a mock or to the real
- * government service" is decided by which process you started rather than by
- * anything the phone can see.
+ * target visible from anywhere on the network, without reading a terminal.
  */
 apiRoutes.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    // The question this endpoint really answers: am I about to file something
-    // real? `mock: true` means no request leaves this machine.
-    mock: config.mockUpstream,
-    upstream: config.mockUpstream ? null : config.upstream,
-  });
+  res.json({ ok: true, upstream: config.upstream });
 });
 
 apiRoutes.use("/auth", authRoutes);

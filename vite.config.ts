@@ -4,16 +4,10 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import tailwindcss from '@tailwindcss/vite'
-import { mockApi } from './plugins/mock-api.ts'
 import { devCa, localCert } from './plugins/dev-cert.ts'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), 'VITE_')
-
-  // Mirrors the default in src/lib/config.ts: mocked unless explicitly off.
-  const useMock = env.VITE_USE_MOCK !== 'false'
-
   /*
    * The Express server's port, so the proxy below follows it.
    *
@@ -29,16 +23,9 @@ export default defineConfig(({ mode }) => {
    * HTTPS is the default, because `getUserMedia` needs a secure context and a
    * phone reaches this over the LAN IP.
    *
-   * `HTTPS=false` serves plain HTTP instead, which is useful for exactly one
-   * thing: exercising the installed PWA. A browser refuses to register a
-   * service worker on an origin with a certificate error, so the self-signed
-   * LAN server can never run one — but `http://localhost` counts as a secure
-   * context, so there the worker *and* the camera both work. See the README,
-   * "Testing the PWA", and `pnpm preview:pwa`.
-   *
    * Read from `process.env` rather than `loadEnv` on purpose: it is a property
-   * of how you are running the server, not app configuration. `server/` follows
-   * the same convention — see `config.https` in server/config.ts.
+   * of how you are running the server, not app configuration. `server/` uses a
+   * `--http` flag for the same thing — see server/config.ts.
    */
   const useHttps = process.env.HTTPS !== 'false'
 
@@ -63,22 +50,12 @@ export default defineConfig(({ mode }) => {
       // from a phone over http://192.168.x.x would have the camera blocked
       // outright, so we serve the LAN dev server over (self-signed) HTTPS.
       //
-      // Note the certificate covers only localhost/127.0.0.1, so a phone on
-      // the LAN IP always sees a certificate warning. That is expected and
-      // harmless here — but it is also why mocking must not rely on a service
-      // worker; see plugins/mock-api.ts.
-      //
       // Only when `pnpm cert` has not been run: a generated certificate is
       // supplied through `server.https` below and is strictly better, since it
       // is the one a phone can be made to trust.
       ...(useHttps && !cert ? [basicSsl()] : []),
       // Serves /dev-ca.crt so a phone can install the CA by visiting the URL.
       devCa(),
-      // Answers every mock endpoint from the dev server itself. The routes come
-      // from src/lib/endpoints.ts, the same table the client uses. The mock
-      // issues its own token at login and demands it everywhere else, so a
-      // request that forgets the header fails here rather than in production.
-      mockApi({ enabled: useMock }),
     ],
     resolve: {
       alias: {
@@ -92,36 +69,30 @@ export default defineConfig(({ mode }) => {
       ...(cert ? { https: cert } : {}),
 
       /*
-       * With mocking off, `/api` comes from the Express server in `server/`.
+       * `/api` comes from the Express server in `server/`, which has to be
+       * running (`pnpm server:watch`) for the dev server to be of any use.
        *
        * Forwarded here rather than called directly so the browser still only
        * ever talks to one origin — no CORS, and no second certificate to
        * accept. `secure: false` because that server uses the same self-signed
        * certificate, and it is Node doing the TLS, not the browser.
-       *
-       * Conditional on `useMock` so the two mechanisms can never both be live:
-       * with mocking on, `mockApi` above answers these paths instead.
        */
-      proxy: useMock
-        ? undefined
-        : {
-            '/api': {
-              target: `https://localhost:${serverPort}`,
-              changeOrigin: true,
-              secure: false,
-            },
-          },
+      proxy: {
+        '/api': {
+          target: `https://localhost:${serverPort}`,
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     /*
      * Preview, on 4174 rather than 4173.
      *
-     * 4173 now belongs to `pnpm server`, which is what a phone actually
-     * connects to. Leaving both here would be a trap: `strictPort` defaults to
-     * false for preview, so with the server already running this would silently
-     * hop to 4174 anyway — and whoever has 4173 bookmarked would get the
-     * Express copy while believing they were testing a fresh build.
-     *
-     * `strictPort` so a collision is an error rather than a surprise.
+     * 4173 belongs to `pnpm server`, which is what a phone actually connects
+     * to. Leaving both here would be a trap: `strictPort` defaults to false for
+     * preview, so with the server already running this would silently hop to
+     * 4174 anyway — and whoever has 4173 bookmarked would get the Express copy
+     * while believing they were testing a fresh build.
      */
     preview: {
       host: true,

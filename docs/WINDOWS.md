@@ -3,10 +3,14 @@
 Este é o roteiro da instalação física: a máquina Windows que vai ficar rodando o
 servidor, e da qual os celulares vão acessar o app.
 
-É a **única máquina autorizada a chamar o serviço real.** Em qualquer outra —
-inclusive a de desenvolvimento — o projeto roda em modo simulado e nenhuma
-requisição sai. Isso é o padrão e não precisa ser configurado; o que precisa de
-um ato deliberado é o contrário (passo 6).
+É a **única máquina autorizada a chamar o serviço real.** Não existe modo
+simulado: o que estiver em `UPSTREAM_URL` é para onde os protocolos vão, e um
+protocolo enviado não volta atrás. Por isso o passo 6 — preencher esse endereço
+— fica por último, depois de todo o resto estar funcionando.
+
+Em qualquer outra máquina, aponte `UPSTREAM_URL` para um host inexistente
+(`https://nao-existe.invalid`): o app sobe inteiro e toda chamada falha limpa,
+sem chegar perto do serviço.
 
 ---
 
@@ -89,7 +93,16 @@ netsh advfirewall firewall show rule name="Leitor de Protocolos"
 > restritivo. Em **Configurações → Rede e Internet**, marque a conexão como
 > **Rede Particular**.
 
-## 5. Testar simulado, antes de ligar no serviço real
+## 5. Testar antes de ligar no serviço real
+
+Deixe o `.env` assim, com um endereço que não existe:
+
+```dotenv
+UPSTREAM_URL=https://nao-existe.invalid
+PORT=4173
+```
+
+E suba:
 
 ```cmd
 npm start
@@ -102,27 +115,27 @@ Isso constrói o app e sobe o servidor. Você deve ver:
   https://localhost:4173
   https://192.168.2.183:4173   ← no celular
 
-  ✓  MODO SIMULADO — nenhuma requisição sai desta máquina.
+  ⚠  SUBMISSÕES REAIS → https://nao-existe.invalid
 ```
 
-Com isso no ar, **valide tudo** — login, escanear, protocolar, relatório — sem
-tocar no serviço real. Qualquer usuário e senha entram. As respostas seguem a
-convenção dos dois últimos dígitos do número (`97` falha na busca, `98` falha ao
-protocolar, `99` falha no AS), então dá para exercitar cada caminho de erro.
+Com isso no ar, valide tudo que **não** depende do serviço: a página abre no
+celular, a câmera funciona, o quadro de mira arrasta, o histórico sobrevive a um
+recarregamento. O login vai falhar com "Falha ao contatar o serviço remoto" — e é
+isso mesmo, porque o endereço não existe. Nada sai da máquina.
 
-Instale o certificado nos celulares agora também (veja
-[IPHONE.md](IPHONE.md) para iOS) — assim, quando ligar no serviço real, a única
-variável nova é o serviço.
+Instale o certificado nos celulares agora também (veja [IPHONE.md](IPHONE.md)
+para iOS). Assim, quando ligar no serviço real, a única variável nova é o
+serviço.
 
 ## 6. Ligar no serviço real ⚠️
 
 **Só depois que o passo 5 estiver inteiramente limpo.**
 
-Abra o `.env` no Bloco de Notas e deixe assim:
+Abra o `.env` no Bloco de Notas e troque o endereço pelo verdadeiro:
 
 ```dotenv
-MOCK_UPSTREAM=false
 UPSTREAM_URL=https://o-endereco-real-do-servico
+PORT=4173
 ```
 
 Pare o servidor (`Ctrl+C`) e suba de novo:
@@ -131,19 +144,43 @@ Pare o servidor (`Ctrl+C`) e suba de novo:
 npm start
 ```
 
-O banner tem de mudar:
+O banner tem de mostrar o endereço real:
 
 ```
   ⚠  SUBMISSÕES REAIS → https://o-endereco-real-do-servico
      Cada protocolo enviado é definitivo. Não há desfazer.
 ```
 
-**Se ainda disser MODO SIMULADO, pare.** O `.env` não foi lido, e nada do que
-você fizer será real — o que é bem melhor do que o contrário, mas resolva antes
-de seguir.
+**Se ainda mostrar o endereço antigo, pare.** O `.env` não foi lido — o servidor
+só o relê ao iniciar.
 
-Então: entre com um usuário de verdade e **protocole um único número que você
-esteja disposto a enviar para valer.** Não existe desfazer.
+Faça então três conferências, nesta ordem:
+
+```cmd
+curl -k https://localhost:4173/api/health
+```
+
+Deve devolver o endereço real. Depois entre com um usuário de verdade pelo app,
+copie o token do DevTools, e confira que a busca não devolve dado pessoal:
+
+```cmd
+curl -k "https://localhost:4173/api/protocolos?protocoloId=SEU_NUMERO" -H "authorization: Bearer SEU_TOKEN"
+```
+
+Tem de sair **exatamente três campos** — `id`, `numprotocolo` e `data`. Se
+aparecer CPF, nome ou endereço, pare: a fronteira de dados está quebrada.
+
+E por fim:
+
+```cmd
+curl -k -i https://localhost:4173/api/nao-existe
+```
+
+Tem de ser **404 em JSON**, nunca uma página HTML. É o que impede um endpoint
+errado ser reportado como protocolo enviado.
+
+Só então: **protocole um único número que você esteja disposto a enviar para
+valer.** Não existe desfazer.
 
 ## 7. Deixar rodando
 

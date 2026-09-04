@@ -49,23 +49,15 @@ server.listen(config.port, "0.0.0.0", () => {
   }
 
   /*
-   * Which mode, printed loudly and every time.
+   * The upstream, printed loudly and every time.
    *
-   * This used to be visible in the app itself: with mocking on, the client
-   * forced its base URL to its own origin, so it was structurally impossible to
-   * reach a real service by accident. Now that the app always calls a relative
-   * `/api`, that safety property lives here — which process you started, with
-   * which settings, is the only thing deciding whether a submission is real.
-   * So it gets said out loud, in the two places someone might look: here, and
-   * `GET /api/health`.
+   * Every protocol this server files is real and cannot be taken back, and the
+   * only thing saying where they go is a line in a `.env` nobody looks at
+   * twice. So the server says it out loud on every start, and `GET /api/health`
+   * answers the same question from anywhere on the network.
    */
-  if (config.mockUpstream) {
-    console.log(`\n  ✓  MODO SIMULADO — nenhuma requisição sai desta máquina.`);
-    console.log(`     Para valer: MOCK_UPSTREAM=false no .env (só na máquina autorizada).`);
-  } else {
-    console.log(`\n  ⚠  SUBMISSÕES REAIS → ${config.upstream}`);
-    console.log(`     Cada protocolo enviado é definitivo. Não há desfazer.`);
-  }
+  console.log(`\n  ⚠  SUBMISSÕES REAIS → ${config.upstream}`);
+  console.log(`     Cada protocolo enviado é definitivo. Não há desfazer.`);
 
   if (!hasBuild()) {
     console.log(`\n  dist/ ausente — a API responde, mas o app não. Rode: pnpm build`);

@@ -1,6 +1,5 @@
-import { config } from "../config.ts";
+import { UPSTREAM_TIMEOUT_MS, config } from "../config.ts";
 import { readDetail } from "./message.ts";
-import { mockUpstream } from "./mock-upstream.ts";
 
 /**
  * The only place in this server that talks to the Mais Cidadão service.
@@ -8,12 +7,7 @@ import { mockUpstream } from "./mock-upstream.ts";
  * Everything else — controllers, DTOs — works on the result this returns. That
  * is deliberate: one function to audit for what leaves the building, one place
  * where the timeout is applied, one place where an upstream status becomes one
- * of ours, and one place where the mock takes over.
- *
- * That last one matters: because the branch is here rather than in the two
- * service files, nothing above this line knows or can behave differently
- * depending on whether it is talking to the real service. Mocked, the DTOs and
- * the selection logic still run on a full upstream-shaped payload.
+ * of ours.
  *
  * ⚠ **Never log `text` or `result.body`.**
  *
@@ -73,18 +67,6 @@ export async function callUpstream({
   query,
   body,
 }: CallOptions): Promise<UpstreamResult> {
-  /*
-   * The mock, and the reason nothing above here changes.
-   *
-   * Checked before the URL is even built, so with `MOCK_UPSTREAM` on there is
-   * no code path from this process to the government service at all — not a
-   * refused request, not a request to a wrong host: no `fetch` call exists.
-   * That is the property, and it is why the check is the first statement.
-   */
-  if (config.mockUpstream) {
-    return mockUpstream(method, path, query);
-  }
-
   const url = new URL(`${config.upstream}${path}`);
   for (const [key, value] of Object.entries(query ?? {})) {
     url.searchParams.set(key, value);
@@ -105,7 +87,7 @@ export async function callUpstream({
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: sendsBody ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(config.timeout),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
 
     // Read the body either way — on a failure it usually holds the reason.
