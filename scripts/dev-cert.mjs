@@ -21,13 +21,13 @@
  *      Regenerated freely — re-running after your DHCP lease changes costs
  *      nothing and does *not* require re-trusting anything on the phone.
  *
- * The server certificate is issued for 397 days on purpose: Apple rejects TLS
- * server certificates valid for more than 398.
+ * The server certificate is issued for 397 days on purpose: it keeps renewals regular
+ * and stays within conservative compatibility limits for Apple devices.
  *
  * Everything lands in `certs/`, which is git-ignored — these are secrets, and a
  * committed CA key would let anyone mint certificates your devices trust.
  *
- * Usage:  pnpm cert   (or: npm run cert)
+ * Usage:  npm run cert   (or: npm run cert)
  */
 
 import { execFileSync } from "node:child_process";
@@ -41,7 +41,7 @@ import { resolve } from "node:path";
  */
 const RUN = (process.env.npm_config_user_agent ?? "").startsWith("npm/")
   ? "npm run"
-  : "pnpm";
+  : "npm run";
 
 const CERT_DIR = resolve(process.cwd(), "certs");
 const CA_KEY = resolve(CERT_DIR, "dev-ca.key");
@@ -131,6 +131,13 @@ function lanAddresses() {
 }
 
 function createCa() {
+  if (existsSync(CA_KEY) !== existsSync(CA_CRT)) {
+    throw new Error(
+      "Incomplete CA: certs/dev-ca.key and certs/dev-ca.crt must both exist. " +
+      "Restore the missing file from backup. To deliberately replace the CA, " +
+      "move the remaining CA file aside and run again; every device must then trust the new CA.",
+    );
+  }
   if (existsSync(CA_KEY) && existsSync(CA_CRT)) {
     console.log("  CA          reusing certs/dev-ca.crt (already trusted on your devices)");
     return false;
@@ -187,7 +194,7 @@ function createServerCert(names) {
     "-CAkey", CA_KEY,
     "-CAcreateserial",
     "-out", SERVER_CRT,
-    // Apple rejects anything above 398 days.
+    // Conservative lifetime; Apple’s public-root 398-day cap does not apply to this private CA.
     "-days", "397",
     "-sha256",
     "-extfile", SERVER_EXT,
@@ -227,15 +234,16 @@ function main() {
   }
 
   console.log("\n  Next:");
-  console.log(`    1. ${RUN} build && ${RUN} preview   (the worker only registers in a production build)`);
+  console.log(`    1. ${RUN} start   (build and serve the app + API; configure .env first)`);
+  console.log(`    2. In another terminal: ${RUN} cert:serve   (temporary HTTP download, Ctrl+C when done)`);
   for (const entry of lan) {
-    console.log(`    2. On the phone, open  https://${entry.address}:4173/dev-ca.crt  to install the CA`);
+    console.log(`       On the phone, open  http://${entry.address}:8080/dev-ca.crt  to install the CA`);
     break;
   }
   console.log("    3. Android: Settings > Security > Encryption & credentials > Install a certificate > CA");
   console.log("       iOS:     open the file, then Settings > General > VPN & Device Management > install,");
   console.log("                then Settings > General > About > Certificate Trust Settings > enable it");
-  console.log("    4. Reload the app — it should now offer to install rather than add a shortcut.");
+  console.log("    4. Open the HTTPS app URL printed by the application server and allow camera access.");
 
   if (!freshCa) {
     console.log("\n  The CA was reused, so devices that already trust it need no change.");

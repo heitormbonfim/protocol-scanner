@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve, sep } from "node:path";
+import { clientDirectory } from "../paths.ts";
 import express, { type Request, type RequestHandler, type Response } from "express";
 import { CERT_HINT, localCa } from "./cert.ts";
 
@@ -15,12 +15,12 @@ import { CERT_HINT, localCa } from "./cert.ts";
 
 // From this file's location rather than the working directory — see the same
 // note in cert.ts. A shortcut on the deployment machine has no reliable cwd.
-const DIST = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist");
+const DIST = clientDirectory;
 
 /** How to spell "run a script" for whoever started the server. */
 const RUN = (process.env.npm_config_user_agent ?? "").startsWith("npm/")
   ? "npm run"
-  : "pnpm";
+  : "npm run";
 
 export const hasBuild = (): boolean => existsSync(resolve(DIST, "index.html"));
 
@@ -84,5 +84,5 @@ export const spaFallback: RequestHandler = (_req: Request, res: Response) => {
     return;
   }
   res.setHeader("Cache-Control", "no-cache");
-  res.sendFile(resolve(DIST, "index.html"));
+  res.sendFile("index.html", { root: DIST });
 };

@@ -93,7 +93,7 @@ export function useCamera() {
       setError(
         window.isSecureContext
           ? 'Este navegador não suporta acesso à câmera.'
-          : 'A câmera exige HTTPS. Abra o app pelo endereço https:// e aceite o certificado.',
+          : 'A câmera exige HTTPS confiável. Abra o endereço https:// do app. No iPhone, instale a CA e ative-a em Ajustes > Geral > Sobre > Ajustes de Confiança de Certificado.',
       )
       return
     }

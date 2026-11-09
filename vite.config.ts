@@ -30,13 +30,13 @@ export default defineConfig(({ mode }) => {
   const useHttps = process.env.HTTPS !== 'false'
 
   /**
-   * A certificate from `pnpm cert`, if one has been generated.
+   * A certificate from `npm run cert`, if one has been generated.
    *
    * This is what makes the app installable on a phone. `basicSsl()` below
    * covers only localhost, so a phone on the LAN address always sees a
    * certificate error — and a browser refuses to register a service worker on
    * such an origin, which is why the app could only ever add a home-screen
-   * shortcut instead of installing. `pnpm cert` issues one that covers the LAN
+   * shortcut instead of installing. `npm run cert` issues one that covers the LAN
    * address and is signed by a CA you install on the phone once.
    */
   const cert = useHttps ? localCert() : null
@@ -50,7 +50,7 @@ export default defineConfig(({ mode }) => {
       // from a phone over http://192.168.x.x would have the camera blocked
       // outright, so we serve the LAN dev server over (self-signed) HTTPS.
       //
-      // Only when `pnpm cert` has not been run: a generated certificate is
+      // Only when `npm run cert` has not been run: a generated certificate is
       // supplied through `server.https` below and is strictly better, since it
       // is the one a phone can be made to trust.
       ...(useHttps && !cert ? [basicSsl()] : []),
@@ -70,7 +70,7 @@ export default defineConfig(({ mode }) => {
 
       /*
        * `/api` comes from the Express server in `server/`, which has to be
-       * running (`pnpm server:watch`) for the dev server to be of any use.
+       * running (`npm run server:watch`) for the dev server to be of any use.
        *
        * Forwarded here rather than called directly so the browser still only
        * ever talks to one origin — no CORS, and no second certificate to
@@ -88,7 +88,7 @@ export default defineConfig(({ mode }) => {
     /*
      * Preview, on 4174 rather than 4173.
      *
-     * 4173 belongs to `pnpm server`, which is what a phone actually connects
+     * 4173 belongs to `npm run server`, which is what a phone actually connects
      * to. Leaving both here would be a trap: `strictPort` defaults to false for
      * preview, so with the server already running this would silently hop to
      * 4174 anyway — and whoever has 4173 bookmarked would get the Express copy

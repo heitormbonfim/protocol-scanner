@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { appRoot } from "../paths.ts";
 
 /**
  * The locally-issued development certificate, read from Node.
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
  * Twin of `plugins/dev-cert.ts`, which does the same for Vite. Duplicated
  * rather than shared because that file lives in the Vite plugin world and
  * imports Vite's types; this one has to stay importable from a plain server
- * process. Both read the same files, written by `pnpm cert`
+ * process. Both read the same files, written by `npm run cert`
  * (`scripts/dev-cert.mjs`).
  *
  * The certificate matters more here than it used to: this server is now the
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 /** How to spell "run a script" for whoever started the server. */
 const RUN = (process.env.npm_config_user_agent ?? "").startsWith("npm/")
   ? "npm run"
-  : "pnpm";
+  : "npm run";
 
 /*
  * Resolved from this file's own location, not `process.cwd()`.
@@ -32,7 +32,7 @@ const RUN = (process.env.npm_config_user_agent ?? "").startsWith("npm/")
  * was launched from — the difference between "it works" and "it silently falls
  * back to HTTP and the camera stops".
  */
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const ROOT = appRoot;
 const CERT_DIR = resolve(ROOT, "certs");
 const CA_CRT = resolve(CERT_DIR, "dev-ca.crt");
 const SERVER_KEY = resolve(CERT_DIR, "dev-server.key");
@@ -44,7 +44,7 @@ export function localCert(): { key: Buffer; cert: Buffer } | null {
   return { key: readFileSync(SERVER_KEY), cert: readFileSync(SERVER_CRT) };
 }
 
-/** The CA, for the `/dev-ca.crt` route. Null when `pnpm cert` has not been run. */
+/** The CA, for the `/dev-ca.crt` route. Null when `npm run cert` has not been run. */
 export function localCa(): Buffer | null {
   return existsSync(CA_CRT) ? readFileSync(CA_CRT) : null;
 }

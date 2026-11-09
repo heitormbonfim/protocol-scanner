@@ -19,7 +19,7 @@ sem chegar perto do serviço.
 | | por quê |
 | --- | --- |
 | **Node.js 20.19+** ([nodejs.org](https://nodejs.org)) | roda tudo. Marque "Add to PATH" no instalador |
-| **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)) | traz o `openssl`, que gera o certificado. O `pnpm cert` procura nas pastas do Git sozinho |
+| **Git for Windows** ([git-scm.com](https://git-scm.com/download/win)) | traz o `openssl`, que gera o certificado. O `npm run cert` procura nas pastas do Git sozinho |
 
 Conferir, no **Prompt de Comando**:
 
@@ -28,10 +28,7 @@ node --version
 npm --version
 ```
 
-> Use **npm**, não pnpm. Os dois funcionam, mas o pnpm depende de symlinks no
-> `node_modules` e é instável em algumas máquinas Windows. O `package-lock.json`
-> está no repositório justamente para isso. Onde este guia diz `npm run X`, o
-> equivalente pnpm é `pnpm X`.
+> Use **Node.js 22.12+ e npm** para desenvolvimento. Para operadores, prefira o executável descrito em [EXECUTABLES.md](EXECUTABLES.md): ele não exige Node ou npm.
 
 ---
 
@@ -276,3 +273,24 @@ celular apenas o número do protocolo, o id e a data.
 Isso significa que **os dados sensíveis existem nesta máquina** e em nenhuma
 outra. Não copie logs do servidor para fora dela sem olhar o que tem dentro. Os
 detalhes estão em "The DTO boundary", no README.
+
+## Download inicial da CA no iPhone
+
+Com o app HTTPS rodando, abra outro terminal na pasta do projeto e execute
+`npm run cert:serve`. No Safari, baixe `http://<IP>:8080/dev-ca.crt`, instale o
+perfil e ative a confiança conforme [IPHONE.md](IPHONE.md).
+
+Se necessário, em um terminal de administrador, permita o download somente
+na rede local durante a configuração:
+
+```bat
+netsh advfirewall firewall add rule name="Leitor CA temporaria" dir=in action=allow protocol=TCP localport=8080 remoteip=localsubnet
+```
+
+Depois de configurar os aparelhos, encerre o helper com Ctrl+C e remova a regra:
+
+```bat
+netsh advfirewall firewall delete rule name="Leitor CA temporaria"
+```
+
+A aplicação continua usando HTTPS na porta 4173. Não abra portas no roteador.

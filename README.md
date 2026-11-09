@@ -337,12 +337,11 @@ novamente os que falharam**.
 ## Running it on your phone
 
 ```bash
-pnpm install     # or: npm install
-pnpm dev         # or: npm run dev
+npm install
+npm run dev
 ```
 
-Either package manager works — see [Scripts](#scripts). The rest of this README
-writes `pnpm`; substitute `npm run` if that is what you use.
+Use Node.js 22.12+ and npm; package-lock.json is the dependency lockfile.
 
 Open **`https://<your-lan-ip>:5173`** on the phone and accept the certificate
 warning. Vite prints the address on the `Network:` line at startup.
@@ -408,12 +407,12 @@ things have to be true, and the default dev setup satisfies neither:
    warning*, and with no worker Chrome offers a bookmark instead of an install.
    iOS enforces this harder still and may not offer to proceed at all.
 2. **It must be a production build.** Registration is behind
-   `import.meta.env.PROD` ([src/main.tsx](src/main.tsx)), so `pnpm dev` never
+   `import.meta.env.PROD` ([src/main.tsx](src/main.tsx)), so `npm run dev` never
    registers a worker no matter how good the certificate is.
 
 #### How the local certificate works
 
-`pnpm cert` issues **two** things, and the split is the whole trick:
+`npm run cert` issues **two** things, and the split is the whole trick:
 
 ```text
   certs/dev-ca.crt          a tiny certificate authority.
@@ -437,7 +436,7 @@ page from a bookmark into an installable app.
 
 Two consequences worth remembering:
 
-- **Re-running `pnpm cert` is cheap.** The CA is reused, so phones that already
+- **Re-running `npm run cert` is cheap.** The CA is reused, so phones that already
   trust it need no attention; only the server certificate is reissued. Do it
   whenever your DHCP lease hands you a new address.
 - **`certs/` is git-ignored, and must stay that way.** Anyone holding
@@ -446,15 +445,23 @@ Two consequences worth remembering:
 
 #### Setting it up
 
-Fix the first with `pnpm cert`, which issues a certificate that actually covers
+Fix the first with `npm run cert`, which issues a certificate that actually covers
 this machine's LAN address, signed by a local CA you install on the phone once:
 
 ```bash
-pnpm cert                # writes certs/ — CA + server certificate
-pnpm start               # build, then serve app + API on 4173
+npm run cert                # writes certs/ — CA + server certificate
+npm start               # build, then serve app + API on 4173
 ```
 
-Then, **on the phone**, open `https://<lan-ip>:4173/dev-ca.crt` and install it:
+In a second terminal, run `npm run cert:serve`. Then, **on the phone**, open
+`http://<lan-ip>:8080/dev-ca.crt` in Safari and install it. This temporary HTTP
+server serves only the public CA; the app and API stay on HTTPS. Allow the
+onboarding port through the firewall for the local network only, and stop the
+helper with Ctrl+C after setup. Use `npm run cert:serve -- 8081` if 8080 is busy.
+You can also transfer `certs/dev-ca.crt` using AirDrop from a Mac. Never share
+`.key` files or expose the app through router port forwarding or public tunnels.
+
+Install and trust the CA:
 
 - **Android** — Settings → Security → Encryption & credentials → Install a
   certificate → **CA certificate**. (Some builds put it under Settings →
@@ -467,12 +474,13 @@ Then, **on the phone**, open `https://<lan-ip>:4173/dev-ca.crt` and install it:
 > **Sending this to someone who is not a developer?** Point them at
 > **[docs/IPHONE.md](docs/IPHONE.md)** instead — the same steps in Portuguese,
 > written for whoever is holding the phone, with the troubleshooting they will
-> actually hit. Android needs none of it; it lets you click through the warning.
+> actually hit. Install the CA on Android too, for a trusted HTTPS connection.
 
 Reload the app and it should offer **Install app**.
 
-Two details that exist to satisfy Apple: the server certificate is issued for
-**397 days** (iOS rejects anything over 398) and carries
+The server certificate is issued for **397 days** as a conservative renewal
+interval (Apple’s 398-day public-root limit does not apply to manually installed
+roots) and carries
 `extendedKeyUsage=serverAuth`, which iOS 13+ requires of every TLS server
 certificate.
 
@@ -484,13 +492,13 @@ While no certificate has been generated, the dev server falls back to
 To exercise the worker without any certificate at all:
 
 ```bash
-pnpm build
-pnpm server:http      # http://localhost:4173
+npm run build
+npm run server:http      # http://localhost:4173
 ```
 
 That serves the real build over **plain HTTP on localhost**, which browsers
 treat as a secure context — so the service worker registers *and* the camera
-still works. It is the same server as `pnpm server`, with TLS off.
+still works. It is the same server as `npm run server`, with TLS off.
 
 A flag (`--http`) rather than an env var, because `HTTPS=false cmd` means
 nothing in Windows' cmd or PowerShell, and Windows is where this is deployed.
@@ -545,7 +553,7 @@ only the first is load-bearing.
 Neither is prefixed `VITE_`, and that is the mechanism rather than a
 convention: that prefix is what makes a value reach the browser bundle, and the
 address of a government service has no business being inlined into JavaScript a
-phone downloads. `pnpm build && grep -ri upstream dist/` returns nothing. See
+phone downloads. `npm run build && grep -ri upstream dist/` returns nothing. See
 [The DTO boundary](#the-dto-boundary).
 
 `UPSTREAM_URL` has no default and the server **refuses to boot** without it.
@@ -756,8 +764,8 @@ single origin to talk to — no CORS, no mixed content, and one certificate to
 trust instead of two.
 
 ```bash
-pnpm cert          # once per machine, and again if its LAN IP changes
-pnpm start         # build, then https://localhost:4173 and https://<lan-ip>:4173
+npm run cert          # once per machine, and again if its LAN IP changes
+npm start         # build, then https://localhost:4173 and https://<lan-ip>:4173
 ```
 
 ### Every run is a real run
@@ -795,7 +803,7 @@ The full setup for the machine that *is* allowed is
 ### Where the settings live
 
 One `.env`, two entries, neither prefixed `VITE_` — so `UPSTREAM_URL` is never
-inlined into anything a phone downloads. `pnpm build && grep -ri upstream dist/`
+inlined into anything a phone downloads. `npm run build && grep -ri upstream dist/`
 returns nothing, and that is the property rather than a habit. Full table in
 [Configuration](#configuration).
 
@@ -805,24 +813,24 @@ Two terminals. The dev server has no API of its own, so the Express server has
 to be up for anything past the login screen to work:
 
 ```bash
-pnpm server:watch      # terminal 1 — the API, restarting on change
-pnpm dev               # terminal 2 — https://localhost:5173, with HMR
+npm run server:watch      # terminal 1 — the API, restarting on change
+npm run dev               # terminal 2 — https://localhost:5173, with HMR
 ```
 
 [vite.config.ts](vite.config.ts) forwards `/api` to the server rather than
 letting the browser call it directly, so there is still exactly one origin in
 play — no CORS, and no second certificate to accept.
 
-`pnpm preview` serves on **4174**, not 4173 — 4173 belongs to `pnpm server`,
+`npm run preview` serves on **4174**, not 4173 — 4173 belongs to `npm run server`,
 which is what a phone connects to.
 
 ### On Windows
 
 The deployment machine is Windows, and three things there are not the same:
 
-- **Env-var prefixes do not work.** `HTTPS=false pnpm server` means nothing in
-  cmd or PowerShell, so the switch is a flag: `pnpm server:http`.
-- **openssl is not on PATH.** `pnpm cert` looks inside Git for Windows, which
+- **Env-var prefixes do not work.** `HTTPS=false npm run server` means nothing in
+  cmd or PowerShell, so the switch is a flag: `npm run server:http`.
+- **openssl is not on PATH.** `npm run cert` looks inside Git for Windows, which
   bundles one, so installing Git is enough.
 - **The firewall blocks port 4173 inbound by default**, silently — the server
   starts, localhost works, and no phone can connect. One `netsh` command fixes
@@ -833,17 +841,17 @@ the server running across reboots.
 
 ### On a phone
 
-The certificate has to be trusted first. Android will let you click through;
-**iPhone will not**, and needs a specific two-step install that is easy to get
+The certificate has to be trusted first. Use a trusted CA on both Android and iPhone.
+**iPhone needs a two-step install** that is easy to get
 half-right — see **[docs/IPHONE.md](docs/IPHONE.md)**.
 
-One thing that catches everyone: `pnpm cert` bakes the machine's LAN IP into the
+One thing that catches everyone: `npm run cert` bakes the machine's LAN IP into the
 certificate's SAN at the moment it runs. Change network, or get a different
 address from DHCP, and the certificate no longer matches:
 
 ```bash
 rm certs/dev-server.*   # keep certs/dev-ca.crt — reusing it keeps phones trusting you
-pnpm cert
+npm run cert
 ```
 
 ---
@@ -871,11 +879,11 @@ of what a change touches, with no possibility of reaching a live government
 service and no mode to accidentally leave switched off.
 
 ```bash
-pnpm server:watch      # terminal 1
-pnpm dev               # terminal 2 — https://localhost:5173
+npm run server:watch      # terminal 1
+npm run dev               # terminal 2 — https://localhost:5173
 ```
 
-Or `pnpm start` for the built app on 4173, which is what a phone gets.
+Or `npm start` for the built app on 4173, which is what a phone gets.
 
 ### Without paper, or without a phone
 
@@ -1053,10 +1061,8 @@ public/
   manifest.webmanifest
   icon-*.png         PWA icons (generated from favicon.svg)
 scripts/
-  check-package-manager.mjs
-                     preinstall guard: allows pnpm and npm, blocks the rest
   dev-cert.mjs       issues the local CA + LAN server certificate
-certs/               generated by `pnpm cert`, git-ignored — never commit
+certs/               generated by `npm run cert`, git-ignored — never commit
 ```
 
 Stack: React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui (Radix),
@@ -1068,79 +1074,33 @@ Tesseract.js, Express 5.
 
 | | |
 | --- | --- |
-| `pnpm start` | **build, then serve app + API on 4173** — what a phone connects to. Runs `tsc`/`vite`/`tsx` directly, so it needs neither pnpm nor npm to be the one driving |
-| `pnpm server` | serve app + API without rebuilding first |
-| `pnpm server:watch` | same, restarting on change, for working on `server/` |
-| `pnpm dev` | LAN dev server over HTTPS on 5173, proxying `/api` to `pnpm server` |
-| `pnpm cert` | issue a dev certificate covering this machine's LAN address, so a phone can install the PWA |
-| `pnpm build` | typecheck (app **and** `server/`) + production build |
-| `pnpm server:http` | same as `pnpm server` with TLS off — `http://localhost:4173` is a secure context, so the service worker registers there |
-| `pnpm preview` | serve the build over HTTPS on **4174** — 4173 belongs to `pnpm server` |
-| `pnpm lint` | oxlint |
-| `pnpm lock:npm` | regenerate `package-lock.json` from `package.json` |
+| `npm start` | **build, then serve app + API on 4173** — what a phone connects to |
+| `npm run server` | serve app + API without rebuilding first |
+| `npm run server:watch` | same, restarting on change, for working on `server/` |
+| `npm run dev` | LAN dev server over HTTPS on 5173, proxying `/api` to `npm run server` |
+| `npm run cert:serve` | temporarily serve only the public CA over HTTP on 8080 for phone setup |
+| `npm run cert` | issue a dev certificate covering this machine's LAN address, so a phone can install the PWA |
+| `npm run build` | typecheck (app **and** `server/`) + production build |
+| `npm run server:http` | same as `npm run server` with TLS off — `http://localhost:4173` is a secure context, so the service worker registers there |
+| `npm run preview` | serve the build over HTTPS on **4174** — 4173 belongs to `npm run server` |
+| `npm run lint` | oxlint |
+| `npm run package` | build standalone Linux x64 and Windows x64 servers in `release/` |
+| `npm run package:linux` | build only Linux x64 |
+| `npm run package:windows` | build only Windows x64 |
 
-Every one of these runs under npm too, as `npm run <name>` (`npm test` and
-`npm install` need no `run`).
+The source project uses npm. End users of the packaged executable need neither Node.js nor a package manager.
 
 > `tsx`, which runs the server's TypeScript, is a **devDependency** while
-> `pnpm server` needs it at runtime. That is fine on the machine this is
+> `npm run server` needs it at runtime. That is fine on the machine this is
 > operated from — which is the only place it runs — but it would break a
 > `--prod` install.
 
-### pnpm or npm
+### Package manager
 
-**Both work.** pnpm is what the project is developed with; npm is fully
-supported because pnpm — really corepack, and `node_modules` symlinks — is
-unreliable on some Windows machines. Each has its lockfile committed:
+Use Node.js 22.12+ and npm. `package-lock.json` records dependencies. Run
+`npm ci` for reproducible installs or `npm install <package>` to add dependencies.
+There is no package-manager installation guard.
 
-| | |
-| --- | --- |
-| pnpm | [pnpm-lock.yaml](pnpm-lock.yaml) |
-| npm | [package-lock.json](package-lock.json) |
-
-A `preinstall` guard
-([scripts/check-package-manager.mjs](scripts/check-package-manager.mjs)) allows
-those two and rejects yarn and bun, which have no lockfile here and would
-resolve their own untested tree.
-
-**The two lockfiles have to be kept in step.** After adding or upgrading a
-package with one manager, regenerate the other's lockfile and commit both:
-
-```bash
-pnpm add <pkg>@<version>   # updates package.json + pnpm-lock.yaml
-pnpm lock:npm              # updates package-lock.json to match
-```
-
-Going the other way, `npm install <pkg>` updates `package-lock.json`, and
-`pnpm install` then brings `pnpm-lock.yaml` back in line.
-
-### On version pinning
-
-Dependencies are pinned to exact versions in `package.json`, and both managers
-are configured to keep it that way (`saveExact` in
-[pnpm-workspace.yaml](pnpm-workspace.yaml), `save-exact` in [.npmrc](.npmrc)).
-That is a pin on what gets *written*, not a gate on installing — it never
-causes an install to fail.
-
-What used to cause failures was the surrounding strictness, all of which has
-been removed deliberately:
-
-- **`packageManager: pnpm@…`** — made corepack fetch one exact pnpm build, and
-  made corepack-shimmed npm refuse to run at all.
-- **`engine-strict`** — turned the `engines` range into a hard install error on
-  any other Node. `engines` is still declared (`node >=20.19.0`, the floor Vite
-  and oxlint ask for) but is now advisory: an older Node warns instead of
-  refusing.
-- **`frozen-lockfile`** — failed the install whenever a different manager
-  version wanted to rewrite the lockfile format.
-
-The reproducible install is still there when you want it — `pnpm install
---frozen-lockfile` or `npm ci`, both of which CI should use. A plain local
-install is allowed to update the lockfile; commit it when it changes.
-
-Note that pnpm's `allowBuilds` (which blocks the msw and tesseract.js
-postinstall banners) has no npm equivalent, so an `npm install` prints those
-two notices. They are cosmetic.
 
 ---
 
@@ -1175,7 +1135,7 @@ intended, and it just stopped a request going somewhere unintended. A path in
 [src/lib/endpoints.ts](src/lib/endpoints.ts) resolves off-origin — the realistic
 slip is a protocol-relative `//host/x`, which looks like a path and is not.
 
-**Everything fails with "sem ID".** Check, in order: `pnpm server` is running
+**Everything fails with "sem ID".** Check, in order: `npm run server` is running
 (the dev server has no API of its own and only proxies to it); `UPSTREAM_URL` in
 `.env` is right — the boot banner prints it; and you are logged in, since an
 expired session shows as *Sessão expirada* and stops the run on the first slip
@@ -1188,8 +1148,8 @@ the SPA fallback and answer `200` with `index.html`. Check with
 [The DTO boundary](#the-dto-boundary) and `server/api.routes.ts`.
 
 **A phone shows a certificate warning that used to be gone.** The machine's LAN
-IP changed; it is baked into the certificate's SAN when `pnpm cert` runs. Delete
-`certs/dev-server.*` — **not** `certs/dev-ca.crt` — and re-run `pnpm cert`.
+IP changed; it is baked into the certificate's SAN when `npm run cert` runs. Delete
+`certs/dev-server.*` — **not** `certs/dev-ca.crt` — and re-run `npm run cert`.
 Reusing the CA means no phone has to be set up again.
 
 **Everything 404s after I changed an HTTP method.** Express polices the verb.
@@ -1208,35 +1168,18 @@ firewall blocks 4173 inbound by default and says nothing. See
 [docs/WINDOWS.md](docs/WINDOWS.md) § 4.
 
 **`openssl was not found` on Windows.** Install
-[Git for Windows](https://git-scm.com/download/win); `pnpm cert` looks for the
+[Git for Windows](https://git-scm.com/download/win); `npm run cert` looks for the
 openssl it bundles.
 
-**pnpm fails to install, or corepack errors out.** Use npm instead — `npm
-install`, then `npm run dev`. Both are supported and both lockfiles are
-committed; see [Scripts](#scripts). This is the expected escape hatch on
-Windows machines where corepack or `node_modules` symlinks misbehave.
-
-**`npm install` says the project is configured to use pnpm.** That is corepack
-intercepting npm. The `packageManager` field that caused it is gone, so pull
-the latest `main` first; if it persists, `corepack disable npm`.
-
-**`npm install` fails with `EUNSUPPORTEDPROTOCOL — Unsupported URL Type
-"workspace:"`.** You are running npm over a `node_modules` that pnpm built. npm
-reads the existing tree, walks into `node_modules/.pnpm/`, and trips on
-`workspace:` specs in packages it was never meant to look at. **Delete
-`node_modules` when switching package managers** — the two lay it out
-differently and cannot share one:
-
-```bash
-rm -rf node_modules      # Windows: rmdir /s /q node_modules
-npm install
-```
+**npm installation fails.** Use Node.js 22.12+ and its bundled npm.
+When migrating from pnpm, remove the old node_modules folder and run `npm ci`. For users who only
+need to run the application, distribute the executable instead of the source.
 
 **The phone adds a shortcut instead of installing the app.** The two causes are
 the certificate and the build; see [Installing on a
-phone](#installing-on-a-phone). Short version: run `pnpm cert`, install
-`https://<lan-ip>:4173/dev-ca.crt` on the phone (on iOS also enable it under
-Certificate Trust Settings), and serve a **production** build — `pnpm dev` never
+phone](#installing-on-a-phone). Short version: run `npm run cert`, install
+`http://<lan-ip>:8080/dev-ca.crt` on the phone while `npm run cert:serve` runs (on iOS also enable it under
+Certificate Trust Settings), and serve a **production** build — `npm run dev` never
 registers a worker by design.
 
 **iOS will not open the page at all.** Same certificate problem, enforced more
@@ -1255,3 +1198,7 @@ not enough — it stays untrusted until you switch it on under Settings → Gene
 next full load; close the installed app and reopen it. If it persists, DevTools
 → Application → Service workers → *Unregister*, then reload. When you have
 changed the caching rules themselves, bump `VERSION` in `public/sw.js`.
+
+## Executáveis Windows e Linux
+
+Use `npm run package` para gerar as duas versões, `npm run package:linux` ou `npm run package:windows` para uma plataforma. Os programas incluem o servidor, Node e frontend, abrem o navegador ao iniciar e leem o `.env` ao lado do executável. Veja [o guia de distribuição](docs/EXECUTABLES.md) para configuração e limitações.

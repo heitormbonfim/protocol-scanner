@@ -1,3 +1,4 @@
+import { openBrowser } from "./desktop.ts";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
@@ -30,7 +31,7 @@ if (config.https && !cert) {
   // LAN address.
   console.warn(
     "⚠  Nenhum certificado em certs/ — subindo em HTTP.\n" +
-      "   A câmera não funciona assim no celular. Rode: pnpm cert",
+      "   A câmera não funciona assim no celular. Rode: npm run cert",
   );
 }
 
@@ -60,7 +61,8 @@ server.listen(config.port, "0.0.0.0", () => {
   console.log(`     Cada protocolo enviado é definitivo. Não há desfazer.`);
 
   if (!hasBuild()) {
-    console.log(`\n  dist/ ausente — a API responde, mas o app não. Rode: pnpm build`);
+    console.log(`\n  dist/ ausente — a API responde, mas o app não. Rode: npm run build`);
   }
   console.log("");
+  openBrowser(`${scheme}://localhost:${config.port}`);
 });

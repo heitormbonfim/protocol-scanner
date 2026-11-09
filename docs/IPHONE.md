@@ -1,38 +1,16 @@
 # Usando o Leitor de Protocolos no iPhone
 
-No Android o app funciona direto. No iPhone não — e não é um defeito do app.
-Este guia resolve, em cerca de dois minutos.
-
-Você só faz isto **uma vez por aparelho**.
-
----
-
-## Por que o Android funciona e o iPhone não
-
-O app precisa da câmera, e todo navegador só libera a câmera em uma página
-**segura** — `https://`. Como ele roda na rede local, e não na internet, o
-certificado `https` é emitido pelo próprio computador. Nenhum aparelho conhece
-quem emitiu esse certificado, então todos desconfiam dele no primeiro acesso.
-
-A diferença está no que cada navegador faz com essa desconfiança:
-
-| | |
-| --- | --- |
-| **Android / Chrome** | Mostra um aviso com "Avançado → Continuar assim mesmo". Você clica e usa. |
-| **iPhone / Safari** | **Não oferece essa saída.** É preciso ensinar o iPhone a confiar em quem emitiu o certificado. |
-
-O que você vai fazer abaixo é exatamente isso: instalar no iPhone o "carimbo"
-do computador, e depois dizer que confia nele. São dois passos separados, e
-**pular o segundo é o erro mais comum** — o iPhone ignora um certificado
-instalado até você ativá-lo à mão.
-
----
+O app pode funcionar na rede local, sem publicar nada na internet. A câmera
+precisa de HTTPS com um certificado confiável. Instale a CA local e ative a
+confiança nela **uma vez por aparelho**. Não dependa de ignorar avisos de
+certificado, nem no Android.
 
 ## Antes de começar
 
 Peça a quem cuida do computador:
 
-- que o servidor esteja rodando (`pnpm server`);
+- que o servidor esteja rodando (`npm run server`);
+- que o download temporário esteja rodando em outro terminal (`npm run cert:serve`);
 - **o endereço**, que tem esta cara: `https://192.168.2.54:4173`.
 
 O iPhone e o computador precisam estar **na mesma rede Wi-Fi**. Não funciona
@@ -54,10 +32,10 @@ pelos dados móveis (4G/5G): esse endereço só existe dentro da rede local.
 
 1. No iPhone, abra o **Safari**. Precisa ser o Safari — Chrome ou Firefox no
    iPhone não conseguem instalar certificados.
-2. Digite o endereço do computador acrescentando `/dev-ca.crt` no final:
+2. Use **HTTP na porta 8080 somente para baixar a CA**:
 
    ```
-   https://192.168.2.54:4173/dev-ca.crt
+   http://192.168.2.54:8080/dev-ca.crt
    ```
 
    (Troque `192.168.2.54` pelo endereço que te passaram.)
@@ -66,9 +44,10 @@ pelos dados móveis (4G/5G): esse endereço só existe dentro da rede local.
    configuração. Toque em **Permitir**.
 4. Aparece "Perfil Baixado". Pode fechar.
 
-> Se o Safari mostrar um aviso de site não seguro **nesta página**, toque em
-> **Mostrar detalhes → Visitar este site**. Só aqui isso é aceitável: você está
-> buscando justamente o certificado que resolve o aviso.
+> Use o link fornecido pelo responsável, na rede da empresa. O servidor mostra
+> a impressão digital SHA-256 da CA para conferência. Se o download não abrir,
+> confira a porta 8080 no firewall. Como alternativa, o responsável pode enviar
+> **somente `certs/dev-ca.crt`** por AirDrop a partir de um Mac.
 
 ---
 
@@ -107,8 +86,9 @@ nele.
    https://192.168.2.54:4173
    ```
 
-2. Não deve aparecer nenhum aviso. Se aparecer, o Passo 3 não foi concluído.
+2. Não deve aparecer nenhum aviso. Se aparecer, confira o Passo 3, o IP e a validade do certificado.
 3. Faça login com seu usuário e senha do Mais Cidadão.
+4. Ao iniciar a câmera, permita o acesso quando o Safari perguntar.
 
 ### Instalar na tela de início (recomendado)
 
@@ -138,13 +118,13 @@ recebeu outro número do roteador, o certificado deixa de servir.
 Quem cuida do computador resolve com:
 
 ```bash
-rm certs/dev-server.*   # NÃO apague certs/dev-ca.crt
-pnpm cert
-pnpm build && pnpm server
+npm run cert
+npm run server   # reinicie o processo para carregar o novo certificado
 ```
 
-Apagar só o `dev-server.*` é importante: o `dev-ca.crt` é o que você instalou no
-iPhone, e reaproveitá-lo significa que **ninguém precisa refazer este guia**.
+O comando substitui o certificado do servidor e preserva a CA. **Guarde tanto
+`dev-ca.crt` quanto `dev-ca.key`**: o primeiro é instalado nos aparelhos e o
+segundo assina as renovações. Não distribua nenhuma chave `.key`.
 
 ### A página não abre de jeito nenhum
 
@@ -156,7 +136,8 @@ iPhone, e reaproveitá-lo significa que **ninguém precisa refazer este guia**.
 ### A câmera não abre
 
 Confirme que o endereço começa com **`https://`**. Em `http://` o iPhone bloqueia
-a câmera, e não há como liberar.
+a câmera pela rede local. Se o HTTPS já está confiável, confira a permissão de
+câmera nas configurações do site no Safari e feche outros apps que a utilizem.
 
 ### Preciso refazer isso quando trocar de celular?
 
@@ -167,23 +148,48 @@ por este guia, nada precisa ser refeito, nem quando o app é atualizado.
 
 ## Para quem cuida do computador
 
-O que o `pnpm cert` gera já atende às três exigências do iOS, e vale saber quais
-são caso algo mude:
+Na máquina que serve o app, já conectada à rede de trabalho:
 
-| exigência do iOS | onde é atendida |
-| --- | --- |
-| validade ≤ 398 dias | `scripts/dev-cert.mjs` emite com 397 |
-| `extendedKeyUsage = serverAuth` | idem, obrigatório desde o iOS 13 |
-| o IP no `subjectAltName` | idem, inclui todo IPv4 da máquina |
+```bash
+npm run cert
+npm start
+```
 
-O `/dev-ca.crt` é servido com `Content-Type: application/x-x509-ca-cert` e
-**sem** `Content-Disposition` — com esse cabeçalho o iOS manda o arquivo para o
-app Arquivos em vez de oferecê-lo como perfil, e a instalação não acontece. Isso
-vale tanto em [server/shared/static.ts](../server/shared/static.ts) quanto em
-[plugins/dev-cert.ts](../plugins/dev-cert.ts).
+Em outro terminal, na mesma pasta:
 
-Para conferir para quais endereços o certificado atual vale:
+```bash
+npm run cert:serve
+# Se 8080 estiver ocupada: npm run cert:serve -- 8081
+```
+
+Libere a porta TCP do app (4173 por padrão) e a porta temporária (8080 por
+padrão) no firewall **somente para a rede local**. Não configure encaminhamento
+de portas no roteador nem túneis públicos. Ao terminar as instalações, encerre
+`cert:serve` com Ctrl+C; o app HTTPS continua funcionando.
+
+O servidor temporário responde apenas por `/dev-ca.crt`, em formato DER e com
+`Content-Type: application/x-x509-ca-cert`. Não serve a aplicação, API, pastas
+nem chaves privadas. A rota HTTPS existente continua disponível para aparelhos
+que já confiam na CA. Não é necessário copiar certificados para `public/`.
+
+O certificado do servidor usa RSA 2048, SHA-256, IPs no `subjectAltName` e
+`extendedKeyUsage=serverAuth`, com validade de 397 dias. O limite Apple de
+398 dias citado para certificados públicos **não se aplica às raízes instaladas
+manualmente**; mantemos 397 dias como prazo conservador de renovação.
+
+Reserve o IP da máquina no DHCP do roteador, se possível. Se o IP mudar ou o
+certificado vencer, rode `npm run cert` e reinicie o servidor. Se faltar um dos
+arquivos da CA, restaure-o do backup. O script recusa substituir uma CA parcial
+silenciosamente, pois trocar a CA exige instalar e confiar novamente em todos
+os aparelhos. Guarde a chave da CA em local protegido.
+
+Para conferir o certificado:
 
 ```bash
 openssl x509 -in certs/dev-server.crt -noout -ext subjectAltName -dates
+openssl verify -CAfile certs/dev-ca.crt -purpose sslserver certs/dev-server.crt
 ```
+
+Referências Apple: [confiança manual no iOS](https://support.apple.com/en-us/102390),
+[certificados para servidores de teste](https://developer.apple.com/library/archive/qa/qa1948/_index.html),
+[escopo do limite de validade](https://support.apple.com/en-us/102028).

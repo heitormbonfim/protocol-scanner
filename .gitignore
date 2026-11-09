@@ -33,10 +33,13 @@ dist-ssr
 *.jpg
 *.jpeg
 
-# Development certificates (pnpm cert).
+# Development certificates (npm run cert).
 # Never commit these: dev-ca.key would let anyone mint certificates that the
 # phones you installed the CA on would trust without warning.
 certs/
 *.key
 *.crt
 *.pem
+# Executáveis e arquivos intermediários de empacotamento
+release/
+.package/

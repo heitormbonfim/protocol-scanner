@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { appRoot } from "./paths.ts";
 /**
  * Everything the server reads from the environment, parsed once at boot.
  *
@@ -19,7 +21,7 @@
  * the check below is what actually refuses to continue.
  */
 try {
-  process.loadEnvFile();
+  process.loadEnvFile(resolve(appRoot, ".env"));
 } catch {
   // No .env. UPSTREAM_URL will be empty, and the check below will say so.
 }
@@ -45,7 +47,7 @@ export const config = {
    * context, so the camera *and* the service worker both work there with no
    * certificate at all.
    *
-   * `pnpm server:http` is the portable spelling. A flag rather than an env var
+   * `npm run server:http` is the portable spelling. A flag rather than an env var
    * because `HTTPS=false cmd` means nothing in Windows' cmd or PowerShell, and
    * Windows is where this is deployed.
    */
