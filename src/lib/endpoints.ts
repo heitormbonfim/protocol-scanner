@@ -53,8 +53,7 @@ export const ENDPOINTS = {
   /**
    * `PUT /api/protocolos/protocolar-as/<id>` — the AS submission.
    *
-   * Never valid on its own: `runProtocolQueue` only reaches it after the
-   * ordinary protocol above has succeeded for the same id.
+   * Independent action, selected separately from the ordinary protocol.
    */
   protocolAs: { method: "PUT", path: "/api/protocolos/protocolar-as" },
 

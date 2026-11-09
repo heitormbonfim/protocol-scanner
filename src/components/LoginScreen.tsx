@@ -49,18 +49,26 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-8 p-6">
-      <header className="space-y-2 text-center">
-        <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-10">
+      <header className="space-y-3">
+        <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-white">
           <ShieldCheck className="size-6" />
         </div>
-        <h1 className="text-xl font-bold tracking-tight">Leitor de Protocolos</h1>
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+          Mais Cidadão · Protocolos
+        </p>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Pronto para começar?
+        </h1>
         <p className="text-sm text-muted-foreground">
           Entre com seu usuário do Mais Cidadão
         </p>
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-5 rounded-2xl border border-border bg-card p-5 shadow-sm"
+      >
         <div className="space-y-2">
           <Label htmlFor="email">Usuário</Label>
           <Input

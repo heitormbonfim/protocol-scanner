@@ -467,7 +467,15 @@ export async function lookupProtocolId(
   if (!id) {
     return { ok: false, reason: "Resposta sem id", httpStatus: result.status };
   }
-  return { ok: true, id };
+  const dto = result.body as Record<string, unknown>;
+  if (dto.numprotocolo !== num) {
+    return { ok: false, reason: "Resposta com número de protocolo diferente" };
+  }
+  return {
+    ok: true, id,
+    nomecompleto: typeof dto.nomecompleto === "string" ? dto.nomecompleto : "",
+    data: typeof dto.data === "string" ? dto.data : "",
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -524,8 +532,7 @@ export function protocolById(
 /**
  * The AS protocol.
  *
- * Never call this without a successful `protocolById` for the same id first —
- * `runProtocolQueue` is what enforces that, and it is the only caller.
+ * Independent of the ordinary submission; the queue sends only selected steps.
  */
 export function protocolAsById(
   id: string,

@@ -22,8 +22,8 @@ type UserChipProps = {
 
 export function UserChip({ usuario, onLogout }: UserChipProps) {
   return (
-    <div className="flex shrink-0 items-center gap-1">
-      <div className="min-w-0 text-right">
+    <div className="flex min-w-0 max-w-full items-center gap-1">
+      <div className="min-w-0 max-w-36 text-right">
         <p className="truncate text-xs font-medium">Usuário: {usuario.nome}</p>
         {usuario.nivel_permissao && (
           <p className="truncate text-[0.6875rem] leading-tight text-muted-foreground">

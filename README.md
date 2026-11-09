@@ -22,7 +22,7 @@ Built for working through a physical pile: *point, confirm, next.*
 >
 > | | |
 > | --- | --- |
-> | 🔒 **AS is never alone** | The AS submission only ever follows a successful ordinary protocol — [details](#the-as-rule) |
+> | **Independent actions** | Select Protocolar, Protocolar AS, or both — [details](#the-as-rule) |
 > | 🆔 **Nothing goes out without its id** | A run waits for the confirm-time lookups instead of failing the slips still resolving — [details](#nothing-is-submitted-without-its-id) |
 > | 🔁 **Nothing is filed twice** | A filed protocol is remembered in a sticky flag, so no rerun, reload or abort can resend it — [details](#nothing-is-ever-filed-twice) |
 > | 🚦 **The upstream is never guessed** | The server refuses to boot without an explicit `UPSTREAM_URL`, and says on every start where submissions go — [details](#configuration) |
@@ -60,7 +60,7 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
                         several frames agree
                                ▼
                         CONFIRM SHEET  (photo + digits side by side)
-                               │  ✓ Confirmar   [x] Protocolar também AS
+                               │  ✓ Confirmar   [x] Protocolar AS
                                ▼
             GET {API_URL}/protocolo?protocoloId=<num>  →  { id }
                     (in the background — scanning never waits)
@@ -79,30 +79,26 @@ Dashboard ──▶ Escanear ──▶ drag the aim box onto "Protocolo Nº"
      one at a time:  PUT {API_URL}/protocolo/protocolaragendamento/<id>
                      PUT {API_URL}/protocolo/protocolaragendamentoas/<id>
                                                            ← only if AS was
-                                                              ticked AND the
-                                                              call above worked
+                                                              ticked independently
+                                                              of the ordinary call
                                ▼
               Relatório — Sucesso / Falha, each row: número · ID · motivo
 ```
 
 ### The AS rule
 
-A slip can be submitted as the ordinary protocol alone, or as the ordinary
-protocol **followed by** AS. AS on its own is never valid, and there is no way
-to ask for it:
+**Protocolar** and **Protocolar AS** are independent checkboxes, both selected
+by default for each new scan. Choose either action, both, or leave an existing
+record out by clearing both. Selected requests run sequentially; AS does not
+depend on ordinary protocol success. Successfully completed actions are never
+resubmitted. Missing IDs fail only the requested actions.
 
-- The UI offers a single "Protocolar também AS" checkbox, not a choice between
-  two options — so "AS only" is not expressible.
-- The AS request is only sent after the ordinary one returns success.
-- If the ordinary protocol fails, AS is reported as **not sent**, with the
-  reason, and no request goes out.
-- A record with no ID sends neither, and both are reported as failures rather
-  than silently skipped — so the report never implies something was submitted
-  when it was not.
-
-This is enforced in one place, [`runRecord` in src/lib/queue.ts](src/lib/queue.ts).
-To check it by hand, scan a number ending in `98`: the ordinary protocol fails,
-and the AS endpoint must never be contacted.
+Reports group each action by its submission timestamp in **America/Fortaleza**,
+not by the scan or upstream opening date. Older results without a timestamp
+appear under “Data não registrada”. The date filter also applies to CSV/copy.
+Client names come from `Pessoa.nomecompleto`, persist in local history, and
+appear in cards, search and exports. Use **Consultar** to retrieve a missing
+name in an older record.
 
 ### Nothing is submitted without its id
 
@@ -252,10 +248,8 @@ What tapping cannot fix is being **inside the camera's minimum focus distance**
 When enough frames agree, the phone vibrates and the confirm sheet appears with
 the **photo above the digits**. Check they match and confirm.
 
-**"Protocolar também AS" starts ticked**, because most slips are protocolled
-alongside AS — untick it for the ones that are not. Either way the choice sticks
-for the next slip, so a run of pages that all go the same way needs no tapping
-at all.
+**Protocolar** and **Protocolar AS** both start checked for each new scan.
+Uncheck either action independently before confirming or in the history card.
 
 **Confirming keeps the camera up for the next slip** — the whole point is
 working through a pile without closing and re-warming the camera each page. A
@@ -279,20 +273,18 @@ Every scan is stored on the device. For each row you can:
 
 | Action | How |
 | --- | --- |
-| **Leave one out of the run** | the big checkbox on the left of the row |
+| **Leave one out of the run** | clear both action checkboxes |
 | **Leave out / include everything** | the checkbox above the list |
-| **Toggle AS** | *Protocolar também AS* on the row |
+| **Toggle AS** | *Protocolar AS* on the row |
 | **Correct the number** | pencil icon, or tap the number on the confirm sheet |
 | **Retry a failed ID lookup** | the refresh icon (only shown when it failed) |
 | **Delete one** | the trash icon on the row |
-| **Search** | the search field, matches on digits |
+| **Search** | the search field, matches client names or protocol digits |
 | **Clear everything** | the trash button next to the search field, with a confirmation |
 
-**Unticking a row leaves it in the history but sends nothing for it** — no
-protocol, no AS. That is different from unticking *Protocolar também AS*, which
-only drops the AS half. The button at the bottom counts what is actually going
-out, so it reads *Protocolar 7* rather than *Protocolar todos*. Already-filed
-rows cannot be unticked, because there is nothing left to leave out.
+Clearing both actions leaves the record in history without sending it. The
+bottom button counts records with selected, unfinished actions. Each successful
+action is locked independently; the other can still be selected later.
 
 Each row states where it stands, in plain terms:
 
@@ -302,7 +294,7 @@ Each row states where it stands, in plain terms:
 | **Protocolando…** | in flight right now |
 | **Falha ao protocolar** | the submission failed; the reason is printed underneath |
 | **AS protocolada** | the AS submission landed |
-| **AS não enviada** | AS was wanted but the ordinary protocol failed first |
+| **AS não enviada** | Legacy skipped AS result; can be retried independently |
 | **sem ID** | the lookup never resolved, so nothing can be submitted |
 | **fora do envio** | you unticked it |
 
@@ -692,9 +684,10 @@ filter at all. It is in the network tab, in the JavaScript heap, and in
 
 ### How to check it
 
-Honestly: by reading. There is no test and no mock any more, so the only check
-that costs nothing is that both DTOs are short enough to read in full, and are
-written so that reading them is conclusive.
+Run `npm run test:data` to check the DTO boundary, independent submission
+actions, persistence migration, report dates and CSV output. These tests use
+mocked responses and never submit to the real service. The DTOs also remain
+short enough to review in full.
 
 That is what "by construction" buys. Each one names every field it emits:
 
@@ -703,12 +696,13 @@ return {
   id: String(p.id ?? ''),
   numprotocolo: String(p.numprotocolo ?? ''),
   data: String(p.data ?? ''),
+  nomecompleto: typeof pessoa?.nomecompleto === 'string' ? pessoa.nomecompleto.trim() : '',
 }
 ```
 
 Nothing is spread, nothing is deleted, nothing is conditional. If a field is not
 written there, it cannot come out — so checking the boundary is checking that
-the object literal has three keys, which takes a glance rather than a test run.
+the object literal has four keys, which takes a glance rather than a test run.
 Keep them that way, and this stays true.
 
 The only check that needs a running server needs a real call, and therefore the
@@ -720,13 +714,13 @@ curl -k 'https://localhost:4173/api/protocolos?protocoloId=<15 digits>' \
   -H 'authorization: Bearer <token>'
 ```
 
-That must print **exactly three keys**:
+That must print **exactly four keys**:
 
 ```json
-{"id":"251474","numprotocolo":"202608260251474","data":"2026-08-26"}
+{"id":"251474","numprotocolo":"202608260251474","data":"2026-08-26","nomecompleto":"Cliente de exemplo"}
 ```
 
-If you see a fourth, or any of `cpf`, `sus`, `nomecompleto`, `celular01`,
+If you see extra fields such as `cpf`, `sus`, `celular01`,
 `Pessoa`, `Logradouro` or `pessoa_id`, the boundary is broken and a citizen's
 record just reached a phone.
 
@@ -936,14 +930,13 @@ curl -k https://localhost:4173/api/health
 #    stops a mistyped endpoint being reported as a filed protocol.
 curl -k -i https://localhost:4173/api/nao-existe
 
-# 3. On real data, nothing personal may cross. Exactly three keys.
+# 3. On real data, only the four whitelisted fields may cross.
 curl -k 'https://localhost:4173/api/protocolos?protocoloId=<15 digits>' \
   -H 'authorization: Bearer <token>'
 ```
 
 Then file **one** protocol you are willing to send for real, and check the
-report. There is no undo, and the AS rule means a successful protocol cannot be
-taken back.
+report. There is no undo for a successful submission.
 
 ---
 

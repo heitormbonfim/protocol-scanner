@@ -9,6 +9,9 @@ import { useScanner } from '@/hooks/useScanner'
 import { lookupProtocolId } from '@/lib/api'
 import {
   pendingRecords,
+  wantsProtocol,
+  isProtocoled,
+  isAsProtocoled,
   runProtocolQueue,
   type QueueProgress,
 } from '@/lib/queue'
@@ -47,12 +50,6 @@ export default function App({ session, onLogout }: AppProps) {
   const [toast, setToast] = useState<string | null>(null)
   /** Slips confirmed since the camera was opened, shown on the scanner. */
   const [sessionCount, setSessionCount] = useState(0)
-  /**
-   * Sticky AS choice, so a run of AS slips does not need re-ticking each page.
-   * Starts **on**: most slips are protocolled alongside AS, so the common case
-   * should be the one that needs no tap. Unticking it sticks just the same.
-   */
-  const [defaultWithAs, setDefaultWithAs] = useState(true)
   /** The aim box, kept across sessions: a form is lined up with once. */
   const [fieldRoi, setFieldRoi] = useState<Roi>(loadFieldRoi)
 
@@ -85,6 +82,7 @@ export default function App({ session, onLogout }: AppProps) {
     [],
   )
 
+  useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => saveRecords(records), [records])
   useEffect(() => saveFieldRoi(fieldRoi), [fieldRoi])
 
@@ -125,6 +123,8 @@ export default function App({ session, onLogout }: AppProps) {
           updateRecord(num, (record) => ({
             ...record,
             id: result.id,
+            nomecompleto: result.nomecompleto,
+            data: result.data,
             lookup: { status: 'ok' },
           }))
         } else {
@@ -166,7 +166,8 @@ export default function App({ session, onLogout }: AppProps) {
     // mid-lookup and this state came back from storage. Ask again, or it would
     // report "Sem ID" forever.
     for (const record of recordsRef.current) {
-      if (!record.id && record.lookup.status === 'pending') void runLookup(record.num)
+      if (!record.id && record.lookup.status === 'pending')
+        void runLookup(record.num)
     }
 
     // A loop, because the sweep above may have started new ones.
@@ -201,12 +202,17 @@ export default function App({ session, onLogout }: AppProps) {
     setScannerOpen(false)
     // Sweep up anything whose id never arrived while scanning.
     for (const record of recordsRef.current) {
-      if (!record.id && record.lookup.status === 'failed') void runLookup(record.num)
+      if (!record.id && record.lookup.status === 'failed')
+        void runLookup(record.num)
     }
   }, [camera, runLookup])
 
   const handleConfirm = useCallback(
-    (num: string, withAs: boolean, edited: boolean) => {
+    (num: string, withAs: boolean, edited: boolean, withProtocol: boolean) => {
+      if (recordsRef.current.some((record) => record.num === num)) {
+        flash('Este protocolo já está no histórico.')
+        return
+      }
       commitRecords((current) => [
         {
           num,
@@ -215,6 +221,7 @@ export default function App({ session, onLogout }: AppProps) {
           editedAt: edited ? Date.now() : undefined,
           source: edited ? 'manual' : (candidate?.source ?? 'manual'),
           withAs,
+          withProtocol,
           lookup: { status: 'pending' },
           protocol: IDLE_STEP,
           as: IDLE_STEP,
@@ -224,7 +231,6 @@ export default function App({ session, onLogout }: AppProps) {
         // Newest first: the row just scanned should be the one you can see.
         ...current,
       ])
-      setDefaultWithAs(withAs)
       setSessionCount((count) => count + 1)
       // The camera stays up: the point of the app is working through a stack,
       // and closing it after every slip would mean reopening and re-warming the
@@ -234,7 +240,7 @@ export default function App({ session, onLogout }: AppProps) {
       setCandidate(null)
       void runLookup(num)
     },
-    [candidate, commitRecords, runLookup],
+    [candidate, commitRecords, runLookup, flash],
   )
 
   // ── History editing ───────────────────────────────────────────────────────
@@ -249,6 +255,8 @@ export default function App({ session, onLogout }: AppProps) {
                 // The id belongs to the old number, so it must be discarded and
                 // looked up again rather than carried across.
                 id: null,
+                nomecompleto: undefined,
+                data: undefined,
                 editedAt: Date.now(),
                 source: 'manual',
                 lookup: { status: 'pending' },
@@ -274,9 +282,6 @@ export default function App({ session, onLogout }: AppProps) {
       updateRecord(num, (record) => ({
         ...record,
         withAs: !record.withAs,
-        // Clear any stale AS result so the row does not claim an outcome for a
-        // submission that is no longer part of the plan.
-        as: IDLE_STEP,
       }))
     },
     [updateRecord],
@@ -286,7 +291,7 @@ export default function App({ session, onLogout }: AppProps) {
     (num: string) => {
       updateRecord(num, (record) => ({
         ...record,
-        selected: record.selected === false,
+        withProtocol: !wantsProtocol(record),
       }))
     },
     [updateRecord],
@@ -295,7 +300,11 @@ export default function App({ session, onLogout }: AppProps) {
   const handleSelectAll = useCallback(
     (selected: boolean) => {
       commitRecords((current) =>
-        current.map((record) => ({ ...record, selected })),
+        current.map((record) => ({
+          ...record,
+          withProtocol: isProtocoled(record) ? record.withProtocol : selected,
+          withAs: isAsProtocoled(record) ? record.withAs : selected,
+        })),
       )
     },
     [commitRecords],
@@ -311,6 +320,8 @@ export default function App({ session, onLogout }: AppProps) {
   // ── Protocol run ──────────────────────────────────────────────────────────
   const runQueue = useCallback(
     async (requested: ProtocolRecord[]) => {
+      if (abortRef.current || !session.usuario.podeProtocolar) return
+      const requestedNumbers = new Set(requested.map((record) => record.num))
       const controller = new AbortController()
       abortRef.current = controller
       setRunning(true)
@@ -325,6 +336,10 @@ export default function App({ session, onLogout }: AppProps) {
        * timeout, and only when something is actually outstanding.
        */
       let batch = requested
+      for (const record of pendingRecords(batch)) {
+        if (!record.id && record.lookup.status === 'failed')
+          void runLookup(record.num)
+      }
       const awaitingId = batch.some(
         (record) => !record.id && record.lookup.status === 'pending',
       )
@@ -340,6 +355,15 @@ export default function App({ session, onLogout }: AppProps) {
         await settleLookups()
         // The ids landed on `recordsRef` while we waited.
         batch = recordsRef.current
+          .filter((record) => requestedNumbers.has(record.num))
+          .map((record) => {
+            const planned = requested.find((item) => item.num === record.num)!
+            return {
+              ...record,
+              withProtocol: planned.withProtocol,
+              withAs: planned.withAs,
+            }
+          })
       }
 
       if (controller.signal.aborted) {
@@ -353,19 +377,6 @@ export default function App({ session, onLogout }: AppProps) {
         signal: controller.signal,
         onProgress: (next) => {
           setProgress(next)
-          if (next.current) {
-            commitRecords((current) =>
-              current.map((record) =>
-                // Never over an already-filed protocol: a record queued only
-                // for its pending AS would have its `success` replaced by a
-                // `running` that nothing settles, and the next run would file
-                // the protocol a second time.
-                record.num === next.current && record.protocoled !== true
-                  ? { ...record, protocol: { status: 'running' } }
-                  : record,
-              ),
-            )
-          }
         },
         onOutcome: (outcome) => {
           commitRecords((current) =>
@@ -374,7 +385,7 @@ export default function App({ session, onLogout }: AppProps) {
               const step: StepState = {
                 status: outcome.ok ? 'success' : 'failed',
                 reason: outcome.reason,
-                at: Date.now(),
+                at: outcome.at ?? Date.now(),
               }
               // `protocoled` only ever goes from false to true here — it is the
               // durable record that something was actually filed.
@@ -399,7 +410,7 @@ export default function App({ session, onLogout }: AppProps) {
       setProgress(null)
       setView('results')
     },
-    [commitRecords, settleLookups],
+    [commitRecords, settleLookups, runLookup, session.usuario.podeProtocolar],
   )
 
   const handleProtocolAll = useCallback(() => {
@@ -421,22 +432,27 @@ export default function App({ session, onLogout }: AppProps) {
   }, [closeScanner, handleProtocolAll])
 
   const handleRetryFailed = useCallback(() => {
-    const reset = recordsRef.current.map((record) => ({
-      ...record,
-      protocol: record.protocol.status === 'failed' ? IDLE_STEP : record.protocol,
-      as:
-        record.as.status === 'failed' || record.as.status === 'skipped'
-          ? IDLE_STEP
-          : record.as,
-    }))
-    commitRecords(() => reset)
+    const failed = recordsRef.current
+      .filter(
+        (record) =>
+          (wantsProtocol(record) && record.protocol.status === 'failed') ||
+          (record.withAs && ['failed', 'skipped'].includes(record.as.status)),
+      )
+      .map((record) => ({
+        ...record,
+        withProtocol:
+          wantsProtocol(record) && record.protocol.status === 'failed',
+        withAs:
+          record.withAs && ['failed', 'skipped'].includes(record.as.status),
+      }))
     setView('dashboard')
-    void runQueue(reset)
-  }, [commitRecords, runQueue])
+    void runQueue(failed)
+  }, [runQueue])
 
   const duplicate =
     candidate !== null && records.some((record) => record.num === candidate.num)
-  const editingRecord = records.find((record) => record.num === editingNum) ?? null
+  const editingRecord =
+    records.find((record) => record.num === editingNum) ?? null
 
   return (
     <>
@@ -511,7 +527,7 @@ export default function App({ session, onLogout }: AppProps) {
         <ConfirmSheet
           candidate={candidate}
           duplicate={duplicate}
-          defaultWithAs={defaultWithAs}
+
           onConfirm={handleConfirm}
           onDiscard={() => setCandidate(null)}
         />

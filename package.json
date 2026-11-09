@@ -17,6 +17,7 @@
     "preview": "vite preview",
     "cert": "node scripts/dev-cert.mjs",
     "cert:serve": "node scripts/serve-ca.mjs",
+    "test:data": "node --import tsx --test tests/*.test.ts",
     "test:cert": "node --test scripts/cert.test.mjs",
     "package": "npm run build && tsx scripts/package.ts",
     "package:linux": "npm run package -- linux",

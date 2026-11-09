@@ -18,25 +18,25 @@ type ConfirmSheetProps = {
   candidate: ScanCandidate
   /** True when this number is already in the history. */
   duplicate: boolean
-  /**
-   * Whether the AS box starts checked. Carries over from the previous confirm,
-   * so a run of AS slips does not need the box ticked one page at a time.
-   */
-  defaultWithAs: boolean
-  onConfirm: (num: string, withAs: boolean, edited: boolean) => void
+  onConfirm: (
+    num: string,
+    withAs: boolean,
+    edited: boolean,
+    withProtocol: boolean,
+  ) => void
   onDiscard: () => void
 }
 
 export function ConfirmSheet({
   candidate,
   duplicate,
-  defaultWithAs,
   onConfirm,
   onDiscard,
 }: ConfirmSheetProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(candidate.num)
-  const [withAs, setWithAs] = useState(defaultWithAs)
+  const [withProtocol, setWithProtocol] = useState(true)
+  const [withAs, setWithAs] = useState(true)
 
   const value = editing ? draft : candidate.num
   const valid = isWellFormed(value)
@@ -66,7 +66,9 @@ export function ConfirmSheet({
               value={draft}
               onChange={(event) =>
                 setDraft(
-                  event.target.value.replace(/\D/g, '').slice(0, PROTOCOL_LENGTH),
+                  event.target.value
+                    .replace(/\D/g, '')
+                    .slice(0, PROTOCOL_LENGTH),
                 )
               }
               inputMode="numeric"
@@ -87,7 +89,7 @@ export function ConfirmSheet({
             onClick={() => setEditing(true)}
             className="group rounded-lg py-1 text-center transition-colors hover:bg-accent"
           >
-            <span className="block font-mono text-3xl font-bold tracking-wide break-all">
+            <span className="block font-mono text-2xl font-bold tracking-tight break-all">
               {formatProtocol(value)}
             </span>
             <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -103,22 +105,25 @@ export function ConfirmSheet({
           </Badge>
         )}
 
-        {/* AS is an add-on to the ordinary protocol, so this is one checkbox
-            rather than a choice between two — "AS only" is never valid. */}
-        <Label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-secondary/50 p-3 has-[button[data-state=checked]]:border-primary has-[button[data-state=checked]]:bg-primary/10">
-          <Checkbox
-            checked={withAs}
-            onCheckedChange={(checked) => setWithAs(checked === true)}
-          />
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium">
-              Protocolar também AS
-            </span>
-            <span className="block text-xs font-normal text-muted-foreground">
-              Envia o protocolo comum e, se ele der certo, o AS.
-            </span>
-          </span>
-        </Label>
+        <div className="grid grid-cols-2 gap-2">
+          <Label className="flex min-h-14 cursor-pointer items-center gap-2 rounded-xl border border-border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5">
+            <Checkbox
+              checked={withProtocol}
+              onCheckedChange={(value) => setWithProtocol(value === true)}
+            />
+            Protocolar
+          </Label>
+          <Label className="flex min-h-14 cursor-pointer items-center gap-2 rounded-xl border border-border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5">
+            <Checkbox
+              checked={withAs}
+              onCheckedChange={(value) => setWithAs(value === true)}
+            />
+            Protocolar AS
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Escolha uma ou as duas ações. Você pode revisar antes de enviar.
+        </p>
 
         {duplicate && (
           <p className="flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
@@ -141,8 +146,8 @@ export function ConfirmSheet({
           </Button>
           <Button
             className="flex-[1.6]"
-            disabled={!valid || duplicate}
-            onClick={() => onConfirm(value, withAs, edited)}
+            disabled={!valid || duplicate || (!withProtocol && !withAs)}
+            onClick={() => onConfirm(value, withAs, edited, withProtocol)}
           >
             Confirmar
           </Button>

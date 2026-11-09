@@ -31,25 +31,35 @@ function normalize(value: unknown): ProtocolRecord | null {
   if (!record.lookup || typeof record.lookup !== 'object') return null
   if (!record.protocol || typeof record.protocol !== 'object') return null
 
-  const as = record.as && typeof record.as === 'object' ? record.as : { status: 'idle' as const }
+  const as =
+    record.as && typeof record.as === 'object'
+      ? record.as
+      : { status: 'idle' as const }
 
   return {
     num: record.num,
     id: record.id,
-    scannedAt: typeof record.scannedAt === 'number' ? record.scannedAt : Date.now(),
+    scannedAt:
+      typeof record.scannedAt === 'number' ? record.scannedAt : Date.now(),
     editedAt: typeof record.editedAt === 'number' ? record.editedAt : undefined,
     source: record.source ?? 'manual',
-    withAs: record.withAs === true,
-    // Included unless explicitly unticked, so a history written before the
-    // checkbox existed does not come back with everything left out of the run.
-    selected: record.selected !== false,
+    nomecompleto:
+      typeof record.nomecompleto === 'string' ? record.nomecompleto : undefined,
+    data: typeof record.data === 'string' ? record.data : undefined,
+    withProtocol: record.withProtocol ?? record.selected !== false,
+    withAs:
+      record.selected === false && record.withProtocol === undefined
+        ? false
+        : record.withAs !== false,
+
     lookup: record.lookup,
     protocol: record.protocol,
     as,
     // Records written before these flags existed carry the fact in their step
     // status instead, so it is recovered here. Getting this wrong would mean
     // re-filing every protocol in an existing history exactly once.
-    protocoled: record.protocoled === true || record.protocol.status === 'success',
+    protocoled:
+      record.protocoled === true || record.protocol.status === 'success',
     asProtocoled: record.asProtocoled === true || as.status === 'success',
   }
 }

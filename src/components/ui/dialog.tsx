@@ -29,13 +29,15 @@ function DialogContent({
   children,
   showClose = true,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  showClose?: boolean
+}) {
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-card p-5 shadow-lg duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+          'fixed left-1/2 top-1/2 z-50 grid max-h-[90dvh] overflow-y-auto w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-card p-5 shadow-lg duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           className,
         )}
         {...props}
@@ -84,12 +86,15 @@ function DialogSheet({
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'pb-safe fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl border-t border-border bg-card p-4 shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
+          'pb-safe fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[90dvh] max-w-lg overflow-y-auto flex flex-col gap-3 rounded-t-2xl border-t border-border bg-card p-4 shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
           className,
         )}
         {...props}
       >
-        <div className="mx-auto h-1 w-10 shrink-0 rounded-full bg-border" aria-hidden />
+        <div
+          className="mx-auto h-1 w-10 shrink-0 rounded-full bg-border"
+          aria-hidden
+        />
         {children}
       </DialogPrimitive.Content>
     </DialogPortal>

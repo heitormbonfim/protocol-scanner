@@ -2,11 +2,6 @@ import type { MatchSource } from './lib/protocol'
 
 /** State of one submission step (the ordinary protocol, or the AS protocol). */
 export type StepState = {
-  /**
-   * `skipped` means the step was deliberately not attempted — either AS was
-   * not requested for this record, or the ordinary protocol failed and AS is
-   * not allowed to run on its own.
-   */
   status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
   /** Populated for success, failure and skip alike, so the report can explain. */
   reason?: string
@@ -24,21 +19,13 @@ export type ProtocolRecord = {
   editedAt?: number
   /** How the scanner found this number, or 'manual' if it was typed/corrected. */
   source: MatchSource | 'manual'
-  /**
-   * Whether this slip also needs the AS protocol submitted.
-   *
-   * There is deliberately no way to express "AS only" — AS is an add-on to the
-   * ordinary protocol, never a substitute for it.
-   */
+  nomecompleto?: string
+  /** Date the upstream record was opened; distinct from submission timestamps. */
+  data?: string
+  /** Independent actions. Missing withProtocol means true for older records. */
+  withProtocol?: boolean
   withAs: boolean
-  /**
-   * Whether this record is included in the next run.
-   *
-   * Unticking leaves a slip in the history but sends nothing for it at all —
-   * separate from `withAs`, which only chooses whether AS accompanies the
-   * ordinary protocol. Defaults to included, so a scan is never silently left
-   * out of a batch by omission.
-   */
+  /** Legacy whole-record selection, migrated when loading local history. */
   selected?: boolean
   lookup: {
     /**
@@ -49,9 +36,9 @@ export type ProtocolRecord = {
     /** Why the id lookup failed. Only set when status is 'failed'. */
     reason?: string
   }
-  /** The ordinary protocol submission. Always attempted. */
+  /** The ordinary protocol submission. */
   protocol: StepState
-  /** The AS submission. Only attempted when `withAs` and `protocol` succeeded. */
+  /** The independent AS submission. */
   as: StepState
   /**
    * This protocol has been filed. Sticky, and the authority on whether to send.
@@ -73,7 +60,7 @@ export type ProtocolRecord = {
 
 /** Result of `GET {lookup}?protocoloId=<num>` — resolves a number to an id. */
 export type LookupResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; nomecompleto: string; data: string }
   | { ok: false; reason: string; httpStatus?: number }
 
 /** Result of a submission — the same shape for both the ordinary and AS calls. */
@@ -89,6 +76,8 @@ export type ProtocolOutcome = {
   num: string
   id: string | null
   kind: OutcomeKind
+  nomecompleto?: string
+  at?: number
   ok: boolean
   reason: string
   httpStatus?: number

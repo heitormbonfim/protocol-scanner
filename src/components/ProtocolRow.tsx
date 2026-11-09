@@ -11,7 +11,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { formatProtocol } from '@/lib/protocol'
-import { isAsProtocoled, isProtocoled, isSelected } from '@/lib/queue'
+import {
+  isAsProtocoled,
+  isProtocoled,
+  isSelected,
+  wantsProtocol,
+} from '@/lib/queue'
 import type { ProtocolRecord } from '@/types'
 
 type ProtocolRowProps = {
@@ -51,14 +56,17 @@ function protocolBadge(record: ProtocolRecord): BadgeSpec | null {
         spin: true,
       }
     case 'failed':
-      return { variant: 'destructive', icon: CircleAlert, text: 'Falha ao protocolar' }
+      return {
+        variant: 'destructive',
+        icon: CircleAlert,
+        text: 'Falha ao protocolar',
+      }
     default:
       return null
   }
 }
 
 function asBadge(record: ProtocolRecord): BadgeSpec | null {
-  if (!record.withAs) return null
   if (isAsProtocoled(record)) {
     return { variant: 'success', icon: CircleCheck, text: 'AS protocolada' }
   }
@@ -101,123 +109,108 @@ export function ProtocolRow({
 }: ProtocolRowProps) {
   const lookupFailed = record.lookup.status === 'failed'
   const selected = isSelected(record)
-  const done = isProtocoled(record) && (!record.withAs || isAsProtocoled(record))
-
   return (
     <li
-      className={`rounded-2xl border bg-card transition-colors ${
-        selected ? 'border-border' : 'border-dashed border-border/70 bg-card/50'
-      }`}
+      className={`overflow-hidden rounded-2xl border bg-card shadow-sm ${selected ? 'border-border' : 'border-dashed border-border'}`}
     >
-      <div className="flex items-start gap-3 p-3">
-        {/* Generous tap target: this is the control people use most on a phone. */}
-        <label className="-m-1 flex cursor-pointer items-center p-1">
-          <Checkbox
-            className="size-5"
-            checked={selected}
-            disabled={busy || done}
-            onCheckedChange={() => onToggleSelected(record.num)}
-            aria-label={
-              selected
-                ? `Deixar ${record.num} fora do envio`
-                : `Incluir ${record.num} no envio`
-            }
-          />
-        </label>
-
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <span
-              className={`font-mono text-base font-semibold break-all ${
-                selected ? '' : 'text-muted-foreground line-through decoration-1'
-              }`}
+      <div className="space-y-3 p-4">
+        <div className="min-w-0">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground">
+            PROTOCOLO
+          </p>
+          <p className="mt-1 break-all font-mono text-base font-semibold tracking-tight">
+            {formatProtocol(record.num)}
+          </p>
+          <h3 className="mt-2 break-words text-base font-semibold leading-snug">
+            {record.nomecompleto ||
+              (record.lookup.status === 'pending'
+                ? 'Buscando cliente…'
+                : 'Nome não disponível')}
+          </h3>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {record.id && <Badge variant="outline">ID {record.id}</Badge>}
+          {record.editedAt && (
+            <Badge variant="outline">
+              <Pencil /> corrigido
+            </Badge>
+          )}
+          {record.lookup.status === 'pending' && (
+            <Badge variant="secondary">
+              <Loader2 className="animate-spin" /> buscando dados
+            </Badge>
+          )}
+          {lookupFailed && (
+            <Badge variant="warning">
+              <CircleAlert /> consulta pendente
+            </Badge>
+          )}
+          <StepBadge spec={protocolBadge(record)} />
+          <StepBadge spec={asBadge(record)} />
+          {!selected && <Badge variant="outline">Fora do envio</Badge>}
+        </div>
+        {[
+          lookupFailed ? record.lookup.reason : null,
+          record.protocol.status === 'failed' ? record.protocol.reason : null,
+          record.as.status === 'failed' ? record.as.reason : null,
+        ]
+          .filter(Boolean)
+          .map((reason, index) => (
+            <p
+              key={index}
+              className="break-words text-xs leading-relaxed text-destructive"
             >
-              {formatProtocol(record.num)}
-            </span>
-
-            <div className="-mt-1 -mr-1 flex shrink-0 items-center">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-9"
-                disabled={busy}
-                onClick={() => onEdit(record.num)}
-                aria-label={`Corrigir ${record.num}`}
-              >
-                <Pencil />
-              </Button>
-              {lookupFailed && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-9"
-                  disabled={busy}
-                  onClick={() => onRetryLookup(record.num)}
-                  aria-label={`Buscar ID de ${record.num}`}
-                >
-                  <RefreshCw />
-                </Button>
-              )}
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-9 text-destructive hover:text-destructive"
-                disabled={busy}
-                onClick={() => onDelete(record.num)}
-                aria-label={`Remover ${record.num}`}
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            {record.editedAt && (
-              <Badge variant="outline">
-                <Pencil /> corrigido
-              </Badge>
-            )}
-            {record.lookup.status === 'pending' && (
-              <Badge variant="secondary">
-                <Loader2 className="animate-spin" /> buscando ID
-              </Badge>
-            )}
-            {record.lookup.status === 'ok' && (
-              <Badge variant="outline">ID {record.id}</Badge>
-            )}
-            {lookupFailed && (
-              <Badge variant="warning">
-                <CircleAlert /> sem ID
-              </Badge>
-            )}
-            <StepBadge spec={protocolBadge(record)} />
-            <StepBadge spec={asBadge(record)} />
-            {!selected && !done && <Badge variant="outline">fora do envio</Badge>}
-          </div>
-
-          {lookupFailed && record.lookup.reason && (
-            <p className="text-xs text-muted-foreground">{record.lookup.reason}</p>
-          )}
-          {record.protocol.status === 'failed' && record.protocol.reason && (
-            <p className="text-xs text-muted-foreground">{record.protocol.reason}</p>
-          )}
-          {record.withAs &&
-            record.as.status !== 'success' &&
-            record.as.status !== 'idle' &&
-            record.as.reason && (
-              <p className="text-xs text-muted-foreground">{record.as.reason}</p>
-            )}
-
-          <label className="flex w-fit cursor-pointer items-center gap-2 py-1 text-xs text-muted-foreground">
+              {reason}
+            </p>
+          ))}
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-lg border border-border px-3 text-sm has-[[data-state=checked]]:border-primary/40 has-[[data-state=checked]]:bg-primary/5">
             <Checkbox
-              className="size-4"
+              checked={wantsProtocol(record)}
+              disabled={busy || isProtocoled(record)}
+              onCheckedChange={() => onToggleSelected(record.num)}
+            />
+            Protocolar
+          </label>
+          <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-lg border border-border px-3 text-sm has-[[data-state=checked]]:border-primary/40 has-[[data-state=checked]]:bg-primary/5">
+            <Checkbox
               checked={record.withAs}
-              disabled={busy || done}
+              disabled={busy || isAsProtocoled(record)}
               onCheckedChange={() => onToggleAs(record.num)}
             />
-            Protocolar também AS
+            Protocolar AS
           </label>
         </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-1 border-t border-border/60 bg-muted/40 px-2 py-1">
+        {(lookupFailed || !record.nomecompleto) && (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onRetryLookup(record.num)}
+            aria-label={`Consultar dados de ${record.num}`}
+          >
+            <RefreshCw /> Consultar
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          disabled={busy || isProtocoled(record) || isAsProtocoled(record)}
+          onClick={() => onEdit(record.num)}
+          aria-label={`Corrigir ${record.num}`}
+        >
+          <Pencil /> Corrigir
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="text-muted-foreground hover:text-destructive"
+          disabled={busy}
+          onClick={() => onDelete(record.num)}
+          aria-label={`Remover ${record.num}`}
+        >
+          <Trash2 />
+        </Button>
       </div>
     </li>
   )

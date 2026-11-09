@@ -1,0 +1,90 @@
+{
+        "id": 264198,
+        "pessoa_id": 10886,
+        "servico_id": 1234,
+        "servicosprestadorvaga_id": null,
+        "servicosprestador_id": 239,
+        "status_id": 2,
+        "entidade_id": 1,
+        "motivo_id": null,
+        "data": "2026-11-09",
+        "data_atendimento": "2026-11-09",
+        "hora_atendimento": "11:50:00",
+        "data_previsao": "2026-11-08",
+        "data_fechamento": null,
+        "datahora_protocolo_resultado": null,
+        "datahora_protocolo_resultado_as": null,
+        "datahora_protocolo_encaminhamento": null,
+        "datahora_protocolo_encaminhamento_as": null,
+        "detalhamento_solicitacao": "HECTAREA : 2\nHORA : 4\nSERVIÇO : ARADO \nPLANTAR : TOMATE \nREFERENCIA : PROX A LEDA ",
+        "detalhamento_encaminhamento": "HECTAREA : 2\nHORA : 4\nSERVIÇO : ARADO \nPLANTAR : TOMATE \nREFERENCIA : PROX A LEDA ",
+        "urgencia": "Não Urgente",
+        "apedido": false,
+        "qtde": "4",
+        "vlr_economia_unit": "250.00",
+        "presenca": null,
+        "status_entrega_encaminhamento": "N",
+        "status_entrega_resultado": "N",
+        "data_entrega": null,
+        "hora_entrega": null,
+        "coordenadas": null,
+        "micro_servicos": [],
+        "created_user": 34,
+        "updated_user": 34,
+        "created_at": "2026-11-09T14:49:10.910Z",
+        "updated_at": "2026-11-09T14:49:10.910Z",
+        "Pessoa": {
+            "id": 10886,
+            "nomecompleto": "JOSE WELIILSON ARAUJO CESAR",
+            "nomesocial": "JOSE WELIILSON ARAUJO CESAR",
+            "cpf": "01649444788",
+            "sus": "702606252424345",
+            "logradouroid": 135,
+            "numcasa": "          ",
+            "complemento": null,
+            "celular01": "(88)99442-0758",
+            "Logradouro": {
+                "id": 135,
+                "nome": "SITIO SALGADO",
+                "cep": "00000-000",
+                "Bairro": {
+                    "id": 11,
+                    "nome": "MOITINGA",
+                    "Distrito": {
+                        "id": 3,
+                        "nome": "AREA RURAL"
+                    }
+                }
+            }
+        },
+        "Status": {
+            "id": 2,
+            "status": "AGENDADO"
+        },
+        "Servico": {
+            "id": 1234,
+            "descricao": " SERVIÇO DE TRATOR",
+            "detalhamento": null
+        },
+        "servicosprestador": {
+            "id": 239,
+            "prestadorid": 23,
+            "servicoid": 239,
+            "created_user": 1,
+            "updated_user": 1,
+            "created_at": "2025-05-28T09:08:17.977Z",
+            "updated_at": "2025-05-28T09:08:17.977Z",
+            "Servico": {
+                "id": 239,
+                "descricao": "SERVICO DE TRATORES - ARADO",
+                "detalhamento": null,
+                "economia": 250
+            },
+            "PrestadorServico": {
+                "id": 23,
+                "nome": "SECRETARIA DE MOVIMENTO AGRARIO E RECURSOS HIDRICOS",
+                "telefone": "8836341004"
+            }
+        },
+        "numprotocolo": "202611090264198"
+    },

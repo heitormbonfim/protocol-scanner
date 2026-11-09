@@ -27,6 +27,7 @@ import { ProtocolRow } from '@/components/ProtocolRow'
 import { formatProtocol } from '@/lib/protocol'
 import {
   isAsProtocoled,
+  isComplete,
   isProtocoled,
   pendingRecords,
   type QueueProgress,
@@ -72,8 +73,10 @@ function Stat({
           ? 'text-warning'
           : 'text-foreground'
   return (
-    <div className="rounded-xl border border-border/60 bg-card px-3 py-2.5">
-      <p className={`text-xl font-bold tabular-nums ${toneClass}`}>{value}</p>
+    <div className="rounded-2xl border border-border/60 bg-card px-4 py-4 shadow-sm">
+      <p className={`text-3xl font-semibold tabular-nums ${toneClass}`}>
+        {value}
+      </p>
       <p className="text-[11px] leading-tight text-muted-foreground">{label}</p>
     </div>
   )
@@ -119,8 +122,7 @@ export function Dashboard({
   const outstanding = useMemo(
     () =>
       records.filter(
-        (record) =>
-          !isProtocoled(record) || (record.withAs && !isAsProtocoled(record)),
+        (record) => !isProtocoled(record) || !isAsProtocoled(record),
       ),
     [records],
   )
@@ -129,7 +131,7 @@ export function Dashboard({
     () => ({
       total: records.length,
       pending: toSend.length,
-      done: records.filter(isProtocoled).length,
+      done: records.filter(isComplete).length,
       failed: records.filter(
         (record) =>
           record.protocol.status === 'failed' ||
@@ -141,14 +143,28 @@ export function Dashboard({
   )
 
   const filtered = useMemo(() => {
-    const digits = query.replace(/\D/g, '')
-    if (!digits) return records
-    return records.filter((record) => record.num.includes(digits))
+    const term = query
+      .trim()
+      .toLocaleLowerCase('pt-BR')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+    if (!term) return records
+    const digits = term.replace(/\D/g, '')
+    return records.filter(
+      (record) =>
+        (digits.length > 0 && record.num.includes(digits)) ||
+        (record.nomecompleto ?? '')
+          .toLocaleLowerCase('pt-BR')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .includes(term),
+    )
   }, [records, query])
 
   const hasResults = records.some(
     (record) =>
       isProtocoled(record) ||
+      isAsProtocoled(record) ||
       record.protocol.status === 'failed' ||
       record.as.status === 'failed',
   )
@@ -158,7 +174,13 @@ export function Dashboard({
       ? Math.round((progress.done / progress.total) * 100)
       : 0
 
-  const allSelected = outstanding.length > 0 && toSend.length === outstanding.length
+  const allSelected =
+    outstanding.length > 0 &&
+    outstanding.every(
+      (record) =>
+        (isProtocoled(record) || record.withProtocol !== false) &&
+        (isAsProtocoled(record) || record.withAs),
+    )
   const noneSelected = toSend.length === 0
   const selectionState = allSelected
     ? true
@@ -167,30 +189,43 @@ export function Dashboard({
       : ('indeterminate' as const)
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="pt-safe sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-md">
-        <div className="flex items-center justify-between gap-2 px-4 py-3">
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold tracking-tight">
-              Leitor de Protocolos
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {stats.total === 0
-                ? 'Nenhum protocolo no histórico'
-                : `${stats.total} no histórico · ${stats.done} protocolados`}
-            </p>
+    <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col">
+      <header className="pt-safe border-b border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-10 place-items-center rounded-xl bg-primary text-white">
+              <ListChecks className="size-5" />
+            </span>
+            <div>
+              <p className="text-base font-bold tracking-tight">Mais Cidadão</p>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                Leitor de protocolos
+              </p>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {hasResults && (
-              <Button variant="outline" size="sm" onClick={onViewResults}>
-                <FileText /> Relatório
-              </Button>
-            )}
-            <UserChip usuario={usuario} onLogout={onLogout} />
-          </div>
+          <UserChip usuario={usuario} onLogout={onLogout} />
         </div>
       </header>
+      <div className="px-4 pt-6 pb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-primary">
+          Área de trabalho
+        </p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold tracking-tight">Seus protocolos</h1>
+          {hasResults && (
+            <Button
+              variant="outline"
+              disabled={running}
+              onClick={onViewResults}
+            >
+              <FileText /> Relatório
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Escaneie, confira os clientes e escolha o que enviar.
+        </p>
+      </div>
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       {records.length === 0 ? (
@@ -206,7 +241,7 @@ export function Dashboard({
         </div>
       ) : (
         <div className="flex flex-1 flex-col gap-3 px-4 py-4">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label="Total" value={stats.total} />
             <Stat label="A enviar" value={stats.pending} />
             <Stat label="Protocolados" value={stats.done} tone="success" />
@@ -214,14 +249,14 @@ export function Dashboard({
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por número…"
-                inputMode="numeric"
-                className="pl-9"
+                placeholder="Buscar cliente ou protocolo"
+                aria-label="Buscar cliente ou protocolo"
+                className="h-12 pl-9 text-base"
               />
             </div>
 
@@ -262,23 +297,23 @@ export function Dashboard({
                 checked={selectionState}
                 disabled={running}
                 onCheckedChange={() => onSelectAll(!allSelected)}
-                aria-label="Selecionar todos para protocolar"
+                aria-label="Selecionar todas as ações pendentes"
               />
               <span className="text-muted-foreground">
                 <span className="font-medium text-foreground tabular-nums">
                   {toSend.length}
                 </span>{' '}
-                de {outstanding.length} selecionados para protocolar
+                com ações selecionadas para envio
               </span>
             </label>
           )}
 
           {filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              Nenhum protocolo contém “{query}”.
+              Nenhum resultado para “{query}”.
             </p>
           ) : (
-            <ul className="space-y-2 pb-2">
+            <ul className="grid items-start gap-3 pb-2 sm:grid-cols-2">
               {filtered.map((record) => (
                 <ProtocolRow
                   key={record.num}
@@ -321,11 +356,11 @@ export function Dashboard({
             </div>
           </div>
         ) : (
-          <div className="flex gap-2 pb-3">
+          <div className="grid grid-cols-2 gap-2 pb-3">
             <Button
               size="lg"
               variant={records.length === 0 ? 'default' : 'outline'}
-              className="flex-1"
+              className={`min-w-0 px-3 text-sm ${records.length === 0 ? 'col-span-2' : ''}`}
               onClick={onOpenScanner}
             >
               <Camera /> Escanear
@@ -333,7 +368,7 @@ export function Dashboard({
             {records.length > 0 && (
               <Button
                 size="lg"
-                className="flex-[1.4]"
+                className="min-w-0 px-3 text-sm"
                 onClick={onProtocolAll}
                 disabled={toSend.length === 0 || !podeProtocolar}
               >
@@ -342,7 +377,7 @@ export function Dashboard({
                   ? 'Sem permissão'
                   : toSend.length === 0
                     ? 'Nada a enviar'
-                    : `Protocolar ${toSend.length}`}
+                    : `Enviar ${toSend.length}`}
               </Button>
             )}
           </div>
