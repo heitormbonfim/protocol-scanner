@@ -45,6 +45,7 @@ Built for working through a physical pile: *point, confirm, next.*
 - [How accurate is the OCR?](#how-accurate-is-the-ocr)
 - [Project layout](#project-layout)
 - [Scripts](#scripts)
+- [Executáveis: copiar certificados e iniciar em HTTP](#executáveis-windows-e-linux)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -1195,3 +1196,120 @@ changed the caching rules themselves, bump `VERSION` in `public/sw.js`.
 ## Executáveis Windows e Linux
 
 Use `npm run package` para gerar as duas versões, `npm run package:linux` ou `npm run package:windows` para uma plataforma. Os programas incluem o servidor, Node e frontend, abrem o navegador ao iniciar e leem o `.env` ao lado do executável. Veja [o guia de distribuição](docs/EXECUTABLES.md) para configuração e limitações.
+
+### Ativar HTTPS apenas copiando a pasta `certs`
+
+Se o computador já tem o executável, **não precisa baixar o projeto nem dar
+`git pull`** para usar certificados existentes. O executável antigo já suporta
+HTTPS quando encontra os arquivos no lugar certo.
+
+1. Encerre o servidor que estiver aberto (Ctrl+C na janela dele).
+2. Copie a pasta `certs` com os certificados válidos para **esse computador**
+   para a mesma pasta do executável. Se já existir uma `certs`, faça backup
+   antes de substituir: trocar a CA exige confiar novamente nos celulares.
+3. Confira a estrutura abaixo. No Linux, o binário chama-se `protocol-scanner`,
+   sem `.exe`; a posição de `certs/` é a mesma.
+4. Inicie normalmente, **sem `--http`**, por `iniciar.cmd` no Windows ou
+   `sh iniciar.sh` no Linux. A janela deve mostrar `https://...`.
+
+```text
+pasta-do-programa/
+├── protocol-scanner.exe       # Linux: protocol-scanner
+├── .env
+├── iniciar.cmd               # Linux: iniciar.sh
+└── certs/
+    ├── dev-ca.crt
+    ├── dev-ca.key
+    ├── dev-server.crt
+    └── dev-server.key
+```
+
+**O certificado precisa cobrir o IP local do computador onde o servidor roda.**
+Copiar certificados de outra máquina com outro IP pode causar aviso de
+certificado. O executável antigo não renova automaticamente: nesse caso,
+peça ao responsável para gerar um certificado para o IP correto, usando a
+mesma CA, ou substitua o binário pela versão nova.
+
+A versão nova gera certificados quando eles não existem e renova o certificado
+do servidor quando o IP muda ou a validade está terminando. Para renovar com a
+mesma CA, precisa de `dev-ca.crt` e `dev-ca.key`. Preserve a pasta `certs` ao
+atualizar. Essas funcionalidades exigem o **executável novo**, mas não exigem
+Git, Node.js ou npm no computador que vai usá-lo.
+
+Guarde os arquivos `.key` no computador do servidor, em local protegido.
+**Nos celulares, instale somente `dev-ca.crt`.** No iPhone, também ative a
+confiança em Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado.
+Se a CA é a mesma que o aparelho já confia, não precisa reinstalá-la.
+Veja [o passo a passo do iPhone](docs/IPHONE.md).
+
+### Windows: iniciar em HTTP com dois cliques
+
+Crie um arquivo chamado **`iniciar-http.cmd`** na mesma pasta do executável,
+com este conteúdo:
+
+```bat
+@echo off
+cd /d "%~dp0"
+"%~dp0protocol-scanner.exe" --http
+pause
+```
+
+No Bloco de Notas, escolha **Salvar como → Tipo: Todos os arquivos**, para não
+salvar como `iniciar-http.cmd.txt`. Depois, basta dar **dois cliques em
+`iniciar-http.cmd`**. Mantenha a janela aberta enquanto usa o aplicativo.
+
+Também pode iniciar pelo PowerShell, dentro da pasta:
+
+```powershell
+.\protocol-scanner.exe --http
+```
+
+### Linux: iniciar em HTTP
+
+Abra um terminal na pasta do programa e execute:
+
+```bash
+sh iniciar.sh --http
+```
+
+Ou execute o binário diretamente:
+
+```bash
+chmod +x protocol-scanner
+./protocol-scanner --http
+```
+
+Para deixar um iniciador pronto, crie **`iniciar-http.sh`** ao lado do
+`iniciar.sh` distribuído com o programa:
+
+```sh
+#!/bin/sh
+cd -- "$(dirname -- "$0")" || exit 1
+exec sh ./iniciar.sh --http
+```
+
+Dê permissão uma vez:
+
+```bash
+chmod +x iniciar-http.sh
+```
+
+Depois escolha **Executar como programa** no gerenciador de arquivos, ou rode
+`sh iniciar-http.sh`. A execução com dois cliques depende do gerenciador e de
+suas configurações; se abrir em um editor, use o terminal. O `iniciar.sh`
+distribuído procura um terminal para manter o servidor visível.
+
+### Qual endereço abrir?
+
+Com `--http`, abra **`http://localhost:4173`** no próprio computador. Se mudou
+`PORT` no `.env`, use a porta configurada. `--http` escolhe HTTP explicitamente;
+não é necessário apagar os certificados e não há redirecionamento automático
+entre HTTP e HTTPS.
+
+**A câmera dos celulares não funciona por HTTP na rede local.** Para os
+celulares, inicie sem `--http`, use `https://<IP-do-computador>:4173` e confie na
+CA. O acesso por `http://localhost` é uma exceção de contexto seguro no próprio
+computador; `localhost` no celular aponta para o celular, não para o servidor.
+
+Encerre a instância anterior antes de mudar o modo. Para voltar ao HTTPS,
+feche o servidor HTTP e abra `iniciar.cmd` ou `sh iniciar.sh` sem a flag.

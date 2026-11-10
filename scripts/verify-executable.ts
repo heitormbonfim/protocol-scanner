@@ -1,3 +1,5 @@
+import { get } from "node:https";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtemp, copyFile, chmod, rm, writeFile } from "node:fs/promises";
@@ -5,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 /** Testa o binário sem fontes/dependências e sem permitir acesso à API real. */
-export async function verifyExecutable(source: string): Promise<void> {
+export async function verifyExecutable(source: string, http = false): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "verificar executavel-"));
   const binary = join(directory, basename(source));
   const socket = createServer();
@@ -37,7 +39,7 @@ export async function verifyExecutable(source: string): Promise<void> {
       "UPSTREAM_URL",
     ])
       delete env[key];
-    child = spawn(binary, ["--no-open", "--http"], {
+    child = spawn(binary, ["--no-open", ...(http ? ["--http"] : [])], {
       cwd: tmpdir(),
       env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -54,13 +56,28 @@ export async function verifyExecutable(source: string): Promise<void> {
     child.on("error", (error) => {
       output += error.message;
     });
-    const base = `http://127.0.0.1:${port}`;
+    const base = `${http ? "http" : "https"}://127.0.0.1:${port}`;
+    const request = async (url: string | URL): Promise<Response> => {
+      if (http) return fetch(url, { signal: AbortSignal.timeout(1000) });
+      const ca = readFileSync(join(directory, "certs/dev-ca.crt"));
+      return new Promise((resolve, reject) => {
+        const req = get(url, { ca, timeout: 1000 }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolve(new Response(Buffer.concat(chunks), {
+            status: res.statusCode,
+            headers: { "content-type": String(res.headers["content-type"] ?? "") },
+          })));
+          res.on("error", reject);
+        });
+        req.on("timeout", () => req.destroy(new Error("Timeout")));
+        req.on("error", reject);
+      });
+    };
     let html = "";
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
-        const response = await fetch(base, {
-          signal: AbortSignal.timeout(1000),
-        });
+        const response = await request(base);
         if (response.ok) {
           html = await response.text();
           break;
@@ -75,7 +92,7 @@ export async function verifyExecutable(source: string): Promise<void> {
       throw new Error(`Frontend indisponível.\n${output}`);
     const asset = html.match(/src="([^"]+\.js)"/)?.[1];
     if (!asset) throw new Error("Bundle do frontend ausente no HTML.");
-    const response = await fetch(new URL(asset, base));
+    const response = await request(new URL(asset, base));
     if (
       !response.ok ||
       !(response.headers.get("content-type") ?? "").includes("javascript")
@@ -85,10 +102,10 @@ export async function verifyExecutable(source: string): Promise<void> {
     const endpoint = basename(source).startsWith("mais-cidadao")
       ? "/api/config"
       : "/api/health";
-    const health = await fetch(base + endpoint);
+    const health = await request(base + endpoint);
     if (!health.ok) throw new Error("A API local não respondeu.");
     console.log(
-      `Executável validado: frontend, assets e API local (${process.platform}).`,
+      `Executável validado: frontend, assets e API local (${process.platform}, ${http ? "HTTP explícito" : "HTTPS com CA validada"}).`,
     );
   } finally {
     if (child && child.exitCode === null) {

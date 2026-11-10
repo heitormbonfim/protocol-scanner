@@ -129,6 +129,7 @@ exec "./${filename}" "$@"
       (platform === "windows" && process.platform === "win32")
     ) {
       await verifyExecutable(resolve(directory, filename));
+      await verifyExecutable(resolve(directory, filename), true);
     } else {
       console.log(
         `Gerado para ${platform}; valide a execução em uma máquina dessa plataforma.`,
@@ -160,7 +161,7 @@ Use --no-open para iniciar sem abrir o navegador.
 No Linux, duplo clique depende das permissões e do gerenciador de arquivos.
 Não abra dois servidores na mesma porta. Edite PORT no .env se necessário.
 Windows pode exibir SmartScreen porque este executável não tem assinatura digital.
-Protocolo: .env precisa de UPSTREAM_URL. Para usar câmera em celulares na rede, copie certificados válidos para certs/ ao lado do executável; eles NÃO são incluídos. A CA precisa ser confiável no celular. Use --http para acesso local sem HTTPS.
+Protocolo: .env precisa de UPSTREAM_URL. HTTPS é o padrão. Na primeira execução, o programa gera a CA e os certificados em certs/ ao lado do executável, sem Node.js ou OpenSSL instalados. A pasta precisa permitir escrita. Instale SOMENTE certs/dev-ca.crt nos celulares e ative a confiança no iPhone. Preserve certs/ ao atualizar: apagar a CA exige configurar os celulares novamente. Nunca compartilhe arquivos .key. O certificado do servidor é renovado quando o IP muda ou a validade está terminando. Se a CA estiver incompleta, o programa mostra um erro em vez de iniciar HTTP. Use --http apenas para acesso local sem HTTPS.
 `,
     );
     console.log(`Executável criado: ${resolve(directory, filename)}`);

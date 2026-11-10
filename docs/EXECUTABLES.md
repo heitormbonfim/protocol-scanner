@@ -14,7 +14,22 @@ Configurações são lidas ao lado do executável mesmo se ele for aberto por at
 
 Os binários são **x64**. Windows ARM e Linux ARM não estão incluídos. Os executáveis não têm assinatura digital; no Windows isso pode gerar aviso de reputação/SmartScreen. Linux requer glibc compatível com o Node 22 usado pelo empacotador; Alpine/musl não é alvo deste comando. A validação de execução foi feita no Linux; o `.exe` precisa ser homologado em Windows.
 
-No protocolar, configure `UPSTREAM_URL` no `.env`. O modo padrão usa HTTPS quando existem `certs/dev-server.key` e `certs/dev-server.crt` ao lado do executável. Para câmera em celulares pela rede, o certificado precisa cobrir o IP da máquina e ser confiável no celular. O responsável técnico pode gerar os arquivos com `npm run cert` nessa máquina e copiar **apenas** `dev-server.key`, `dev-server.crt` e `dev-ca.crt` para a pasta `certs/` do executável. Não distribua `dev-ca.key`. O empacotamento não inclui certificados nem altera essa exigência de HTTPS. Para uso no próprio computador, `--http` permite acesso por localhost.
+Configure `UPSTREAM_URL` no `.env`. **HTTPS é o padrão**, inclusive sem certificados
+pré-existentes. Na primeira execução, o programa gera uma CA local e um
+certificado para localhost e os IPs da máquina em `certs/` ao lado do executável.
+Não precisa instalar Node.js nem OpenSSL. A pasta deve permitir escrita.
+
+Instale **somente `certs/dev-ca.crt`** nos celulares; no iPhone, também ative a
+confiança em Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado.
+Preserve `certs/` ao atualizar o executável. Cada instalação nova tem sua própria
+CA; não distribua a pasta de chaves entre colegas. O servidor renova seu
+certificado quando o IP muda ou falta um dia para vencer, reutilizando a CA.
+
+Certificados existentes são preservados se válidos para a máquina. Uma implantação
+com apenas a CA pública e o certificado do servidor continua funcionando, mas a
+renovação exige a chave da CA original. Erros de certificado agora impedem a
+inicialização, sem fallback para HTTP. `--http` continua disponível explicitamente
+para acesso por localhost.
 
 ## Para quem desenvolve
 
@@ -44,7 +59,7 @@ O empacotador pode informar `Cannot resolve mod` (mecanismo de views do Express,
 
 ## Verificação e rede local
 
-O empacotamento testa automaticamente o binário da plataforma em que está sendo executado, em uma pasta isolada e com upstream local de teste. Valida HTML, JavaScript e API local. A outra plataforma exige teste em seu próprio sistema. Windows e Linux x64 são os alvos disponíveis.
+O empacotamento testa automaticamente o binário da plataforma em que está sendo executado, em uma pasta isolada e com upstream local de teste. Valida HTML, JavaScript e API local em HTTPS, verificando a confiança na CA gerada pelo binário, e também testa HTTP explícito. A outra plataforma exige teste em seu próprio sistema. Windows e Linux x64 são os alvos disponíveis.
 
 Use o endereço de rede exibido no terminal nos demais computadores da mesma rede. No Windows, permita a porta do servidor no firewall para redes privadas. Mantenha o servidor aberto. O endereço localhost funciona apenas no próprio computador.
 
@@ -57,7 +72,7 @@ Mantenha essa janela aberta durante o uso. Para encerrar o servidor, pressione *
 O iniciador procura x-terminal-emulator, GNOME Terminal, Konsole, XFCE Terminal ou xterm. Em ambientes sem um deles, inicie pelo seu terminal com `sh iniciar.sh`.
 
 Para instalar a CA no iPhone sem depender de HTTPS ainda não confiável, use
-`npm run cert:serve` na cópia do projeto que gerou **essa mesma CA**, acessível
+`npm run cert:serve` em uma cópia do projeto com **o mesmo dev-ca.crt do executável** em `certs/`, acessível
 na rede local. Abra no Safari o link HTTP impresso, instale o perfil e ative
 a confiança conforme [IPHONE.md](IPHONE.md). Alternativamente, transfira
 `dev-ca.crt` por AirDrop a partir de um Mac. O executável continua em HTTPS;

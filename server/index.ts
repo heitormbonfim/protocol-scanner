@@ -4,7 +4,9 @@ import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
 import { config } from "./config.ts";
 import { createApp } from "./app.ts";
-import { localCert } from "./shared/cert.ts";
+import { ensureLocalCertificate } from "./shared/ensure-cert.ts";
+import { appRoot } from "./paths.ts";
+import { resolve } from "node:path";
 import { hasBuild } from "./shared/static.ts";
 
 /**
@@ -23,17 +25,9 @@ function lanAddresses(): string[] {
     .map((iface) => iface!.address);
 }
 
-const cert = config.https ? localCert() : null;
-
-if (config.https && !cert) {
-  // Not fatal, but it does mean no phone can use this: `getUserMedia` needs a
-  // secure context, so the camera simply will not start over plain HTTP on a
-  // LAN address.
-  console.warn(
-    "⚠  Nenhum certificado em certs/ — subindo em HTTP.\n" +
-      "   A câmera não funciona assim no celular. Rode: npm run cert",
-  );
-}
+const cert = config.https
+  ? ensureLocalCertificate(resolve(appRoot, "certs"))
+  : null;
 
 const app = createApp();
 const server = cert
